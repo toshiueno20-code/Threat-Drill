@@ -1,0 +1,61 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: aegisflow-gatekeeper
+  labels:
+    app: aegisflow
+    component: gatekeeper
+spec:
+  template:
+    metadata:
+      annotations:
+        # Cloud Runのスケーリング設定
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "100"
+        # コンテナの起動時間を考慮
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: aegisflow-gatekeeper@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+      - name: gatekeeper
+        image: REGION-docker.pkg.dev/PROJECT_ID/aegisflow/gatekeeper:latest
+        ports:
+        - name: http1
+          containerPort: 8080
+        env:
+        - name: GCP_PROJECT_ID
+          value: "PROJECT_ID"
+        - name: GCP_LOCATION
+          value: "us-central1"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: JSON_LOGS
+          value: "true"
+        - name: ENABLE_DEEP_THINK
+          value: "true"
+        - name: ENABLE_PROMETHEUS
+          value: "true"
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+          requests:
+            cpu: "1"
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+  traffic:
+  - percent: 100
+    latestRevision: true
