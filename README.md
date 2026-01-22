@@ -162,13 +162,15 @@ chmod +x scripts/deploy.sh
 
 開発者がリポジトリURLを渡すと、Gemini 3が「AIアプリとしての設計上の脆弱性」を全スキャンします。
 
-#### 監視対象
+**重要:** ファイル名ではなく、**ファイルの内容をGemini 3で分析**して自動判定します。どんなファイル名でも、内容から役割を正確に識別できます。
 
-- **System Prompt** (`system_prompt.txt`): プロンプトインジェクション脆弱性
-- **Tool Definitions** (`tools.py`, `functions.json`): 過剰権限のチェック
-- **Config Files** (`app_config.yaml`): モデル設定と権限設定
-- **RAG Configs**: 機密情報漏洩リスク
-- **API Keys**: ハードコードされたシークレット
+#### 監視対象（内容ベース自動検出）
+
+- **System Prompt**: AIへの指示文（"You are...", "あなたは..."など）を含むファイル → プロンプトインジェクション脆弱性をチェック
+- **Tool Definitions**: 関数定義、API呼び出し、ツール設定を含むファイル → 過剰権限をチェック
+- **Config Files**: モデル設定、エンドポイント、パラメータを含むファイル → セキュリティ設定をチェック
+- **RAG Configs**: ベクトルストア、embedding、検索設定を含むファイル → 機密情報漏洩リスクをチェック
+- **API Keys**: APIキー、トークン、パスワードを含むファイル → 認証情報漏洩をチェック
 
 #### Gemini 3によるチェック内容
 

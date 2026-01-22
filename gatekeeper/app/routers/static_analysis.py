@@ -66,18 +66,21 @@ async def scan_repository(
     )
 
     try:
-        # GitHubアナライザーの初期化
-        repo_analyzer = GitHubRepositoryAnalyzer(github_token=request.github_token)
-
-        # リポジトリ解析
-        logger.info("Analyzing repository", scan_id=scan_id)
-        config = repo_analyzer.analyze_repository(str(request.repository_url))
-
         # Geminiクライアントの初期化
         gemini_client = GeminiClient(
             project_id=settings.gcp_project_id,
             location=settings.gcp_location,
         )
+
+        # GitHubアナライザーの初期化（Geminiクライアントを渡す）
+        repo_analyzer = GitHubRepositoryAnalyzer(
+            github_token=request.github_token,
+            gemini_client=gemini_client,
+        )
+
+        # リポジトリ解析（内容ベース）
+        logger.info("Analyzing repository (content-based)", scan_id=scan_id)
+        config = await repo_analyzer.analyze_repository(str(request.repository_url))
 
         # 脆弱性スキャン
         scanner = AIAppSecurityScanner(gemini_client)

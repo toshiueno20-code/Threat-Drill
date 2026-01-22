@@ -1,4 +1,7 @@
-"""GitHub Repository Analyzer for AI Application Security."""
+"""GitHub Repository Analyzer for AI Application Security.
+
+ファイル名ではなく、ファイルの内容をGemini 3で分析して判定します。
+"""
 
 import os
 import re
@@ -36,55 +39,28 @@ class AIAppConfiguration:
     code_files: List[RepositoryFile]
     rag_configs: List[RepositoryFile]
     api_keys_files: List[RepositoryFile]
+    all_files: List[RepositoryFile]  # 全ファイル（未分類含む）
 
 
 class GitHubRepositoryAnalyzer:
     """GitHubリポジトリを解析してAI関連ファイルを抽出."""
 
-    # AI関連ファイルのパターン
-    AI_PATTERNS = {
-        "system_prompts": [
-            r".*system[_-]?prompt.*\.(txt|md|json|yaml|yml)",
-            r".*prompt.*template.*",
-            r".*/prompts?/.*",
-        ],
-        "tool_definitions": [
-            r".*tools?\.(py|js|ts|json)",
-            r".*functions?\.(py|js|ts|json)",
-            r".*function[_-]?calling.*",
-            r".*tool[_-]?config.*",
-        ],
-        "config_files": [
-            r".*app[_-]?config\.(yaml|yml|json|toml)",
-            r".*\.?env.*",
-            r".*config\.(yaml|yml|json|toml)",
-            r".*settings\.(py|js|ts)",
-        ],
-        "rag_configs": [
-            r".*rag.*config.*",
-            r".*vector.*store.*",
-            r".*embedding.*config.*",
-            r".*knowledge.*base.*",
-        ],
-        "api_keys": [
-            r".*\.env.*",
-            r".*secrets?.*",
-            r".*credentials?.*",
-            r".*api[_-]?keys?.*",
-        ],
-    }
+    CODE_EXTENSIONS = {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".java", ".rb", ".txt", ".md", ".json", ".yaml", ".yml", ".toml"}
 
-    CODE_EXTENSIONS = {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".java", ".rb"}
+    # スキップするディレクトリ
+    SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "dist", "build", "__pycache__"}
 
-    def __init__(self, github_token: Optional[str] = None):
+    def __init__(self, github_token: Optional[str] = None, gemini_client=None):
         """
         GitHubアナライザーの初期化.
 
         Args:
             github_token: GitHub Personal Access Token
+            gemini_client: Gemini クライアント（内容分析用）
         """
         self.github_token = github_token
         self.github_client = Github(github_token) if github_token else None
+        self.gemini_client = gemini_client
 
     def clone_repository(self, repo_url: str, target_dir: Optional[str] = None) -> Path:
         """
@@ -117,9 +93,165 @@ class GitHubRepositoryAnalyzer:
             logger.error("Failed to clone repository", error=str(e), repo_url=repo_url)
             raise
 
-    def scan_directory(self, directory: Path) -> AIAppConfiguration:
+    async def classify_file_content(self, file_content: str, file_path: str) -> Optional[str]:
+        """
+        Gemini 3を使用してファイルの内容から役割を判定.
+
+        Args:
+            file_content: ファイルの内容
+            file_path: ファイルパス（参考情報）
+
+        Returns:
+            ファイルの分類 ("system_prompt", "tool_definition", "config", "rag_config", "api_keys", "code", None)
+        """
+        if not self.gemini_client:
+            # Geminiクライアントがない場合はキーワードベースの簡易分類
+            return self._classify_by_keywords(file_content, file_path)
+
+        # ファイルが空または短すぎる場合はスキップ
+        if len(file_content.strip()) < 10:
+            return None
+
+        try:
+            # Gemini 3で分析
+            classification_prompt = f"""
+以下のファイルの内容を分析し、このファイルがAIアプリケーションにおいてどの役割を持っているか判定してください。
+
+ファイルパス: {file_path}
+ファイル内容（最初の2000文字）:
+```
+{file_content[:2000]}
+```
+
+以下のカテゴリから1つ選択してください：
+
+1. **system_prompt**: AIのSystem Prompt（システムプロンプト、指示文）
+   - 特徴: "You are...", "あなたは...", "Act as...", AIへの役割定義や振る舞いの指示
+
+2. **tool_definition**: AIが使用するツール・関数の定義
+   - 特徴: function定義、tool定義、API呼び出し関数、database操作関数
+
+3. **config**: アプリケーション設定ファイル
+   - 特徴: model名、API endpoint、環境変数、一般的な設定項目
+
+4. **rag_config**: RAG（Retrieval-Augmented Generation）関連の設定
+   - 特徴: vector store設定、embedding設定、knowledge base設定
+
+5. **api_keys**: APIキーや認証情報を含む可能性があるファイル
+   - 特徴: API keys, tokens, passwords, credentials
+
+6. **code**: AIロジックを含むコードファイル
+   - 特徴: LLM呼び出し、agent実装、チャット機能のコード
+
+7. **none**: 上記のいずれにも該当しない
+
+JSON形式で以下のように回答してください：
+{{
+  "category": "system_prompt|tool_definition|config|rag_config|api_keys|code|none",
+  "confidence": 0.0-1.0,
+  "reasoning": "判定理由"
+}}
+"""
+
+            # TODO: 実際のGemini API呼び出し
+            # result = await self.gemini_client.analyze_with_flash(...)
+
+            # モック: キーワードベース分類にフォールバック
+            return self._classify_by_keywords(file_content, file_path)
+
+        except Exception as e:
+            logger.warning(
+                "Failed to classify file with Gemini, using keyword-based classification",
+                file_path=file_path,
+                error=str(e),
+            )
+            return self._classify_by_keywords(file_content, file_path)
+
+    def _classify_by_keywords(self, content: str, file_path: str) -> Optional[str]:
+        """
+        キーワードベースの簡易分類（Geminiが使えない場合のフォールバック）.
+
+        Args:
+            content: ファイル内容
+            file_path: ファイルパス
+
+        Returns:
+            分類結果
+        """
+        content_lower = content.lower()
+
+        # System Promptキーワード
+        system_prompt_keywords = [
+            "you are", "あなたは", "act as", "your role is",
+            "system prompt", "system instruction", "assistant behavior",
+            "instructions:", "role:", "behavior:",
+        ]
+
+        # Tool定義キーワード
+        tool_keywords = [
+            "def ", "function ", "async def", "tool_call", "function_call",
+            "@tool", "tools.register", "function_calling",
+            '"tools":', '"functions":', "tool_config",
+        ]
+
+        # RAG関連キーワード
+        rag_keywords = [
+            "vector", "embedding", "chroma", "pinecone", "weaviate",
+            "faiss", "rag", "retrieval", "knowledge_base",
+            "document_store", "vectorstore",
+        ]
+
+        # APIキーパターン
+        api_key_patterns = [
+            r"api[_-]?key",
+            r"sk-[a-zA-Z0-9]{20,}",  # OpenAI形式
+            r"AIza[0-9A-Za-z-_]{35}",  # Google API
+            r"bearer\s+[a-zA-Z0-9]+",
+            r"token\s*=",
+            r"password\s*=",
+            r"secret",
+        ]
+
+        # Config関連キーワード
+        config_keywords = [
+            "model:", "api_endpoint", "base_url", "temperature",
+            "max_tokens", "settings", "configuration",
+        ]
+
+        # System Prompt判定
+        if any(kw in content_lower for kw in system_prompt_keywords):
+            # さらに確認：実際にプロンプトっぽい構造があるか
+            if len(content) > 50 and ("you" in content_lower or "あなた" in content):
+                return "system_prompt"
+
+        # Tool定義判定
+        if any(kw in content_lower for kw in tool_keywords):
+            return "tool_definition"
+
+        # RAG設定判定
+        if any(kw in content_lower for kw in rag_keywords):
+            return "rag_config"
+
+        # APIキー判定
+        for pattern in api_key_patterns:
+            if re.search(pattern, content_lower):
+                return "api_keys"
+
+        # Config判定
+        if any(kw in content_lower for kw in config_keywords):
+            return "config"
+
+        # AIコード判定
+        ai_code_keywords = ["openai", "anthropic", "langchain", "llm", "chatgpt", "gpt-", "claude"]
+        if any(kw in content_lower for kw in ai_code_keywords):
+            return "code"
+
+        return None
+
+    async def scan_directory(self, directory: Path) -> AIAppConfiguration:
         """
         ディレクトリをスキャンしてAI関連ファイルを抽出.
+        ファイル名ではなく内容から判定します。
 
         Args:
             directory: スキャン対象ディレクトリ
@@ -127,7 +259,7 @@ class GitHubRepositoryAnalyzer:
         Returns:
             AIアプリケーション設定情報
         """
-        logger.info("Scanning directory for AI files", directory=str(directory))
+        logger.info("Scanning directory for AI files (content-based)", directory=str(directory))
 
         system_prompts: List[RepositoryFile] = []
         tool_definitions: List[RepositoryFile] = []
@@ -135,26 +267,32 @@ class GitHubRepositoryAnalyzer:
         code_files: List[RepositoryFile] = []
         rag_configs: List[RepositoryFile] = []
         api_keys_files: List[RepositoryFile] = []
+        all_files: List[RepositoryFile] = []
 
         # ディレクトリを再帰的にスキャン
         for file_path in directory.rglob("*"):
             if not file_path.is_file():
                 continue
 
-            # .gitディレクトリやnode_modulesなどをスキップ
-            if any(part.startswith(".") or part == "node_modules" for part in file_path.parts):
+            # スキップディレクトリのチェック
+            if any(skip_dir in file_path.parts for skip_dir in self.SKIP_DIRS):
                 continue
 
             relative_path = file_path.relative_to(directory)
             path_str = str(relative_path)
+
+            # コード系ファイルのみ処理
+            if file_path.suffix not in self.CODE_EXTENSIONS:
+                continue
 
             # ファイルサイズチェック（10MB以上はスキップ）
             if file_path.stat().st_size > 10 * 1024 * 1024:
                 continue
 
             try:
-                # テキストファイルのみ読み込み
+                # テキストファイルを読み込み
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
+
                 file_info = RepositoryFile(
                     path=path_str,
                     content=content,
@@ -162,36 +300,37 @@ class GitHubRepositoryAnalyzer:
                     size=len(content),
                 )
 
-                # パターンマッチング
-                if self._matches_patterns(path_str, self.AI_PATTERNS["system_prompts"]):
+                all_files.append(file_info)
+
+                # 内容から分類
+                category = await self.classify_file_content(content, path_str)
+
+                if category == "system_prompt":
                     system_prompts.append(file_info)
-                    logger.debug("Found system prompt file", path=path_str)
+                    logger.info("Classified as system prompt (by content)", path=path_str)
 
-                elif self._matches_patterns(path_str, self.AI_PATTERNS["tool_definitions"]):
+                elif category == "tool_definition":
                     tool_definitions.append(file_info)
-                    logger.debug("Found tool definition file", path=path_str)
+                    logger.info("Classified as tool definition (by content)", path=path_str)
 
-                elif self._matches_patterns(path_str, self.AI_PATTERNS["config_files"]):
+                elif category == "config":
                     config_files.append(file_info)
-                    logger.debug("Found config file", path=path_str)
+                    logger.info("Classified as config (by content)", path=path_str)
 
-                elif self._matches_patterns(path_str, self.AI_PATTERNS["rag_configs"]):
+                elif category == "rag_config":
                     rag_configs.append(file_info)
-                    logger.debug("Found RAG config file", path=path_str)
+                    logger.info("Classified as RAG config (by content)", path=path_str)
 
-                elif self._matches_patterns(path_str, self.AI_PATTERNS["api_keys"]):
+                elif category == "api_keys":
                     api_keys_files.append(file_info)
-                    logger.debug("Found API keys file", path=path_str)
+                    logger.info("Classified as API keys file (by content)", path=path_str)
 
-                # コードファイル
-                elif file_path.suffix in self.CODE_EXTENSIONS:
-                    # AI関連キーワードを含むコードファイルのみ
-                    if self._contains_ai_keywords(content):
-                        code_files.append(file_info)
-                        logger.debug("Found AI-related code file", path=path_str)
+                elif category == "code":
+                    code_files.append(file_info)
+                    logger.debug("Classified as AI code (by content)", path=path_str)
 
             except Exception as e:
-                logger.warning("Failed to read file", path=path_str, error=str(e))
+                logger.warning("Failed to read/classify file", path=path_str, error=str(e))
                 continue
 
         config = AIAppConfiguration(
@@ -201,52 +340,25 @@ class GitHubRepositoryAnalyzer:
             code_files=code_files,
             rag_configs=rag_configs,
             api_keys_files=api_keys_files,
+            all_files=all_files,
         )
 
         logger.info(
-            "Directory scan completed",
+            "Directory scan completed (content-based classification)",
             system_prompts_count=len(system_prompts),
             tool_definitions_count=len(tool_definitions),
             config_files_count=len(config_files),
             code_files_count=len(code_files),
             rag_configs_count=len(rag_configs),
             api_keys_count=len(api_keys_files),
+            total_files=len(all_files),
         )
 
         return config
 
-    def _matches_patterns(self, path: str, patterns: List[str]) -> bool:
-        """パスがパターンにマッチするかチェック."""
-        path_lower = path.lower()
-        return any(re.match(pattern, path_lower, re.IGNORECASE) for pattern in patterns)
-
-    def _contains_ai_keywords(self, content: str) -> bool:
-        """コンテンツにAI関連キーワードが含まれるかチェック."""
-        ai_keywords = [
-            "openai",
-            "anthropic",
-            "gemini",
-            "langchain",
-            "llama",
-            "claude",
-            "gpt",
-            "chatgpt",
-            "ai_model",
-            "llm",
-            "embedding",
-            "vector_store",
-            "rag",
-            "agent",
-            "tool_call",
-            "function_call",
-        ]
-
-        content_lower = content.lower()
-        return any(keyword in content_lower for keyword in ai_keywords)
-
-    def analyze_repository(self, repo_url: str) -> AIAppConfiguration:
+    async def analyze_repository(self, repo_url: str) -> AIAppConfiguration:
         """
-        GitHubリポジトリを解析.
+        GitHubリポジトリを解析（内容ベース）.
 
         Args:
             repo_url: GitHubリポジトリURL
@@ -254,14 +366,14 @@ class GitHubRepositoryAnalyzer:
         Returns:
             AIアプリケーション設定情報
         """
-        logger.info("Starting repository analysis", repo_url=repo_url)
+        logger.info("Starting content-based repository analysis", repo_url=repo_url)
 
         # クローン
         repo_dir = self.clone_repository(repo_url)
 
         try:
-            # スキャン
-            config = self.scan_directory(repo_dir)
+            # スキャン（内容ベース）
+            config = await self.scan_directory(repo_dir)
             return config
 
         finally:
