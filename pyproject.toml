@@ -33,6 +33,10 @@ opentelemetry-sdk = "^1.22.0"
 opentelemetry-instrumentation-fastapi = "^0.43b0"
 prometheus-client = "^0.19.0"
 structlog = "^24.1.0"
+gitpython = "^3.1.40"
+pygithub = "^2.1.1"
+reportlab = "^4.0.7"
+functions-framework = "^3.5.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
