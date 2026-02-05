@@ -5,6 +5,7 @@ description = "次世代AIエージェント専用の自己進化型セキュリ
 authors = ["AegisFlow Team"]
 license = "MIT"
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
