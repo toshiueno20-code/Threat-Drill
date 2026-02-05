@@ -4,9 +4,12 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 
 from ..config import settings
@@ -145,3 +148,15 @@ app.include_router(
     prefix="/api/v1/red-team",
     tags=["red-team"],
 )
+
+# 静的ファイルとダッシュボード
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> FileResponse:
+    """ダッシュボードページを返す."""
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
