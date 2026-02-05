@@ -10,7 +10,7 @@ import socket
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from playwright.async_api import async_playwright, AsyncPage, AsyncBrowserContext
+from playwright.async_api import async_playwright, Page, BrowserContext
 
 from shared.utils import get_logger
 
@@ -261,8 +261,8 @@ class PlaywrightMCPServer:
         self._timeout_ms = timeout_ms
         self._playwright: Any = None
         self._browser: Any = None
-        self._context: Optional[AsyncBrowserContext] = None
-        self._page: Optional[AsyncPage] = None
+        self._context: Optional[BrowserContext] = None
+        self._page: Optional[Page] = None
         # Captured network responses (body, url, status) for exfil analysis
         self._network_log: List[Dict[str, Any]] = []
 
