@@ -127,7 +127,7 @@ async def readiness_check() -> dict[str, str]:
 
 from typing import Any  # noqa: E402
 
-from .routers import security, analysis, static_analysis, dynamic_proxy  # noqa: E402
+from .routers import security, analysis, static_analysis, dynamic_proxy, red_team  # noqa: E402
 
 # ルーターの登録
 app.include_router(security.router, prefix="/api/v1/security", tags=["security"])
@@ -141,4 +141,9 @@ app.include_router(
     dynamic_proxy.router,
     prefix="/api/v1/dynamic-proxy",
     tags=["dynamic-proxy"],
+)
+app.include_router(
+    red_team.router,
+    prefix="/api/v1/red-team",
+    tags=["red-team"],
 )
