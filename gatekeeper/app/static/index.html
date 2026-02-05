@@ -95,6 +95,11 @@
             animation: pulse 2s infinite;
         }
 
+        .status-dot.error {
+            background: var(--danger);
+            animation: none;
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -178,7 +183,6 @@
         .stat-value {
             font-size: 28px;
             font-weight: 700;
-            margin-bottom: 4px;
         }
 
         .stat-label {
@@ -583,6 +587,18 @@
             to { transform: rotate(360deg); }
         }
 
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
         footer {
             text-align: center;
             padding: 24px;
@@ -630,7 +646,7 @@
             </div>
             <div class="status-badge" id="systemStatus">
                 <div class="status-dot"></div>
-                <span>System Online</span>
+                <span>Checking...</span>
             </div>
         </header>
 
@@ -646,7 +662,7 @@
                 <div class="stat-card">
                     <div class="stat-header">
                         <div>
-                            <div class="stat-value" id="totalRequests">0</div>
+                            <div class="stat-value" id="totalRequests">--</div>
                             <div class="stat-label">Total Requests</div>
                         </div>
                         <div class="stat-icon blue">📊</div>
@@ -655,7 +671,7 @@
                 <div class="stat-card">
                     <div class="stat-header">
                         <div>
-                            <div class="stat-value" id="threatsBlocked">0</div>
+                            <div class="stat-value" id="threatsBlocked">--</div>
                             <div class="stat-label">Threats Blocked</div>
                         </div>
                         <div class="stat-icon red">🚫</div>
@@ -673,8 +689,8 @@
                 <div class="stat-card">
                     <div class="stat-header">
                         <div>
-                            <div class="stat-value" id="activeRules">0</div>
-                            <div class="stat-label">Active Rules</div>
+                            <div class="stat-value" id="activeSkills">--</div>
+                            <div class="stat-label">Attack Skills</div>
                         </div>
                         <div class="stat-icon green">📋</div>
                     </div>
@@ -685,7 +701,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h2>Recent Security Events</h2>
-                        <button class="btn btn-outline" onclick="refreshEvents()">Refresh</button>
+                        <button class="btn btn-outline" onclick="fetchEvents()">Refresh</button>
                     </div>
                     <div class="card-body">
                         <table class="events-table">
@@ -698,7 +714,10 @@
                                 </tr>
                             </thead>
                             <tbody id="eventsBody">
-                                <tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No events</td></tr>
+                                <tr><td colspan="4" class="empty-state">
+                                    <div class="icon">📭</div>
+                                    <div>No security events yet</div>
+                                </td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -751,8 +770,9 @@
                             <div class="form-group" id="skillSelector">
                                 <label>Select Attack Skill</label>
                                 <div class="skill-grid" id="skillGrid">
-                                    <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
-                                        Loading skills...
+                                    <div class="empty-state">
+                                        <div class="spinner" style="margin: 0 auto 12px;"></div>
+                                        <div>Loading skills...</div>
                                     </div>
                                 </div>
                             </div>
@@ -873,6 +893,12 @@
         let selectedSkill = null;
         let isRunning = false;
         let availableSkills = [];
+        let securityEvents = [];
+        let stats = {
+            totalRequests: 0,
+            threatsBlocked: 0,
+            avgLatency: 0
+        };
 
         // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -892,49 +918,84 @@
 
         // Health check
         async function checkHealth() {
+            const statusBadge = document.getElementById('systemStatus');
             try {
                 const response = await fetch('/health');
                 const data = await response.json();
-                const statusBadge = document.getElementById('systemStatus');
                 if (data.status === 'healthy') {
                     statusBadge.innerHTML = '<div class="status-dot"></div><span>System Online</span>';
                 } else {
-                    statusBadge.innerHTML = '<div class="status-dot" style="background: var(--danger)"></div><span>System Error</span>';
+                    statusBadge.innerHTML = '<div class="status-dot error"></div><span>System Error</span>';
                 }
             } catch (error) {
-                const statusBadge = document.getElementById('systemStatus');
-                statusBadge.innerHTML = '<div class="status-dot" style="background: var(--danger)"></div><span>Connection Error</span>';
+                statusBadge.innerHTML = '<div class="status-dot error"></div><span>Connection Error</span>';
             }
         }
 
-        // Stats
-        function updateStats() {
-            document.getElementById('totalRequests').textContent = Math.floor(Math.random() * 10000);
-            document.getElementById('threatsBlocked').textContent = Math.floor(Math.random() * 100);
-            document.getElementById('avgLatency').textContent = Math.floor(Math.random() * 50 + 10);
-            document.getElementById('activeRules').textContent = availableSkills.length || '--';
+        // Fetch real stats from API
+        async function fetchStats() {
+            try {
+                // Fetch skills count
+                const skillsResponse = await fetch('/api/v1/red-team/scenarios');
+                if (skillsResponse.ok) {
+                    const skillsData = await skillsResponse.json();
+                    availableSkills = skillsData.scenarios || [];
+                    document.getElementById('activeSkills').textContent = availableSkills.length;
+                }
+            } catch (error) {
+                console.error('Failed to fetch stats:', error);
+            }
+
+            // Display actual stats (these will be updated as events come in)
+            document.getElementById('totalRequests').textContent = stats.totalRequests || '--';
+            document.getElementById('threatsBlocked').textContent = stats.threatsBlocked || '--';
+            document.getElementById('avgLatency').textContent = stats.avgLatency || '--';
         }
 
-        // Events
-        function refreshEvents() {
+        // Fetch real security events
+        async function fetchEvents() {
             const tbody = document.getElementById('eventsBody');
-            const events = [
-                { time: new Date().toLocaleTimeString(), type: 'Request Analysis', level: 'safe', source: '127.0.0.1' },
-                { time: new Date().toLocaleTimeString(), type: 'XSS Detection', level: 'high', source: '192.168.1.100' },
-                { time: new Date().toLocaleTimeString(), type: 'SQL Injection', level: 'critical', source: '10.0.0.50' },
-            ];
+            try {
+                const response = await fetch('/api/v1/security/events');
+                if (response.ok) {
+                    const data = await response.json();
+                    securityEvents = data.events || [];
 
-            tbody.innerHTML = events.map(e => `
-                <tr>
-                    <td>${e.time}</td>
-                    <td>${e.type}</td>
-                    <td><span class="threat-badge threat-${e.level}">${e.level}</span></td>
-                    <td>${e.source}</td>
-                </tr>
-            `).join('');
+                    if (securityEvents.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">
+                            <div class="icon">📭</div>
+                            <div>No security events yet</div>
+                        </td></tr>`;
+                        return;
+                    }
+
+                    // Update stats from events
+                    stats.totalRequests = securityEvents.length;
+                    stats.threatsBlocked = securityEvents.filter(e => e.blocked).length;
+
+                    tbody.innerHTML = securityEvents.slice(0, 10).map(e => `
+                        <tr>
+                            <td>${new Date(e.timestamp).toLocaleTimeString()}</td>
+                            <td>${e.type || 'Analysis'}</td>
+                            <td><span class="threat-badge threat-${e.threat_level || 'safe'}">${e.threat_level || 'safe'}</span></td>
+                            <td>${e.source_ip || '--'}</td>
+                        </tr>
+                    `).join('');
+
+                    // Update displayed stats
+                    document.getElementById('totalRequests').textContent = stats.totalRequests;
+                    document.getElementById('threatsBlocked').textContent = stats.threatsBlocked;
+                }
+            } catch (error) {
+                // API might not have events endpoint implemented yet
+                tbody.innerHTML = `<tr><td colspan="4" class="empty-state">
+                    <div class="icon">📭</div>
+                    <div>No security events yet</div>
+                </td></tr>`;
+            }
         }
 
-        // Load attack skills
+        // Load attack skills from API
         async function loadSkills() {
             const grid = document.getElementById('skillGrid');
             try {
@@ -943,7 +1004,10 @@
                 availableSkills = data.scenarios || [];
 
                 if (availableSkills.length === 0) {
-                    grid.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">No skills available</div>';
+                    grid.innerHTML = `<div class="empty-state">
+                        <div class="icon">🔧</div>
+                        <div>No attack skills available</div>
+                    </div>`;
                     return;
                 }
 
@@ -954,9 +1018,13 @@
                     </button>
                 `).join('');
 
-                updateStats();
+                document.getElementById('activeSkills').textContent = availableSkills.length;
             } catch (error) {
-                grid.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--terminal-red);">Error loading skills: ${error.message}</div>`;
+                grid.innerHTML = `<div class="empty-state">
+                    <div class="icon">⚠️</div>
+                    <div>Failed to load skills</div>
+                    <div style="font-size: 12px; margin-top: 8px;">${error.message}</div>
+                </div>`;
                 terminalLog('error', `Failed to load skills: ${error.message}`);
             }
         }
@@ -1085,6 +1153,9 @@
                     terminalLog('info', JSON.stringify(data, null, 2));
                 }
 
+                // Refresh events after attack
+                setTimeout(fetchEvents, 1000);
+
             } catch (error) {
                 terminalLog('error', `✗ Error: ${error.message}`);
             } finally {
@@ -1174,6 +1245,8 @@
                         terminalLog('info', 'System Status: Online');
                         terminalLog('info', `Skills loaded: ${availableSkills.length}`);
                         terminalLog('info', `Target: ${document.getElementById('targetUrl').value}`);
+                        terminalLog('info', `Total requests: ${stats.totalRequests}`);
+                        terminalLog('info', `Threats blocked: ${stats.threatsBlocked}`);
                         break;
                     default:
                         terminalLog('error', `Unknown command: ${command}. Type 'help' for available commands.`);
@@ -1183,11 +1256,11 @@
 
         // Initialize
         checkHealth();
-        updateStats();
-        refreshEvents();
+        fetchStats();
+        fetchEvents();
 
+        // Periodic health check only
         setInterval(checkHealth, 30000);
-        setInterval(updateStats, 10000);
     </script>
 </body>
 </html>
