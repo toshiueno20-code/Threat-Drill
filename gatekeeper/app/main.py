@@ -2,7 +2,7 @@
 
 import time
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,8 +124,6 @@ async def readiness_check() -> dict[str, str]:
     # TODO: Vertex AI, Firestoreへの接続確認
     return {"status": "ready", "service": "aegisflow-gatekeeper"}
 
-
-from typing import Any  # noqa: E402
 
 from .routers import security, analysis, static_analysis, dynamic_proxy, red_team  # noqa: E402
 
