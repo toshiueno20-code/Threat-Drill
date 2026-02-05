@@ -1,106 +1,77 @@
 """Attack Orchestrator — unified static (GitHub) + dynamic (URL) red-team flow.
 
-Flow:
-    1. [Static] GitHub URL → clone → content-based scan → vuln report
-    2. [Dynamic] Target URL → Gemini attack-plan → Playwright MCP execution → results
-    3. Consolidated report (per-attack detail + aggregate score)
+Architecture
+------------
+1. [Recon]   Navigate once → collect structured ``ReconData``.
+2. [Plan]    Feed recon into Gemini 3 Flash → ``AttackPlan`` (ordered skill list).
+3. [Execute] Run each skill in priority order, passing recon so skills skip
+             redundant page-fetches.
+4. [Report]  Aggregate ``SkillResult`` list → score → ``RedTeamReport``.
 
-Gemini 3 is used to:
-    - Plan which attacks are most relevant for the discovered app stack
-    - Classify attack success/failure after execution
-    - Generate new attack variants from prior results
+All data-transfer objects are Pydantic v2 ``BaseModel`` so the router can
+serialise them with a single ``model_dump()`` call.
 """
 
 import json
-import time
+import re
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from shared.schemas import ThreatLevel
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
 from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer, validate_localhost_url
-from red_teaming.mcp_server.attack_tools import ATTACK_REGISTRY, AttackResult
+from red_teaming.skills import get_registry, SkillResult, ReconData
 
 logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Data classes
+# Pydantic v2 report models
 # ---------------------------------------------------------------------------
 
 
-class AttackPlan:
-    """Gemini-generated attack plan for a target."""
+class AttackPlan(BaseModel):
+    """Gemini-generated attack plan."""
 
-    def __init__(
-        self,
-        plan_id: str,
-        target_url: str,
-        reasoning: str,
-        selected_attacks: List[str],
-        priority_order: List[str],
-    ):
-        self.plan_id = plan_id
-        self.target_url = target_url
-        self.reasoning = reasoning
-        self.selected_attacks = selected_attacks
-        self.priority_order = priority_order
-        self.created_at = datetime.utcnow().isoformat()
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "plan_id": self.plan_id,
-            "target_url": self.target_url,
-            "reasoning": self.reasoning,
-            "selected_attacks": self.selected_attacks,
-            "priority_order": self.priority_order,
-            "created_at": self.created_at,
-        }
+    plan_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    target_url: str
+    reasoning: str = ""
+    selected_attacks: list[str] = Field(default_factory=list)
+    priority_order: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
-class RedTeamReport:
-    """Consolidated red-team report covering static + dynamic phases."""
+class RedTeamReport(BaseModel):
+    """Consolidated red-team report — static + dynamic phases."""
 
-    def __init__(self, report_id: str, target_url: str):
-        self.report_id = report_id
-        self.target_url = target_url
-        self.started_at = datetime.utcnow().isoformat()
-        self.finished_at: Optional[str] = None
-        self.static_result: Optional[Dict[str, Any]] = None
-        self.attack_plan: Optional[AttackPlan] = None
-        self.attack_results: List[AttackResult] = []
-        self.overall_score: float = 100.0  # 100 = secure; deductions per finding
-        self.summary: str = ""
+    report_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    target_url: str
+    started_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    finished_at: str | None = None
+    static_result: dict[str, Any] | None = None
+    attack_plan: AttackPlan | None = None
+    attack_results: list[SkillResult] = Field(default_factory=list)
+    overall_score: float = 100.0
+    summary: str = ""
 
     def calculate_score(self) -> float:
-        """Deduce from 100 based on confirmed attack severities."""
-        score = 100.0
+        """Deduct from 100 per confirmed vulnerability severity."""
         deductions = {
             ThreatLevel.CRITICAL: 25,
             ThreatLevel.HIGH: 15,
             ThreatLevel.MEDIUM: 7,
             ThreatLevel.LOW: 3,
         }
-        for result in self.attack_results:
-            if result.success:
-                score -= deductions.get(result.severity, 5)
+        score = 100.0
+        for r in self.attack_results:
+            if r.success:
+                score -= deductions.get(r.severity, 5)
         self.overall_score = max(score, 0.0)
         return self.overall_score
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "report_id": self.report_id,
-            "target_url": self.target_url,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "static_result": self.static_result,
-            "attack_plan": self.attack_plan.to_dict() if self.attack_plan else None,
-            "attack_results": [r.to_dict() for r in self.attack_results],
-            "overall_score": self.overall_score,
-            "summary": self.summary,
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -109,134 +80,93 @@ class RedTeamReport:
 
 
 class AttackOrchestrator:
-    """Orchestrates the full red-team pipeline.
-
-    Args:
-        gemini_client: GeminiClient instance for AI-driven planning / analysis
-    """
+    """Orchestrates the full red-team pipeline via the Skill registry."""
 
     def __init__(self, gemini_client: GeminiClient):
         self.gemini_client = gemini_client
 
     # --- Public API ---------------------------------------------------------
 
-    async def run_static_scan(self, github_url: str) -> Dict[str, Any]:
-        """Run GitHub static security scan via the existing static_analyzer.
-
-        Delegates to GitHubRepositoryAnalyzer + AIAppSecurityScanner.
-        Returns the scan result dict (same as /static-analysis/scan response).
-        """
+    async def run_static_scan(self, github_url: str) -> dict[str, Any]:
+        """GitHub static security scan — delegates to existing static_analyzer."""
         from static_analyzer.github_integration.repo_analyzer import GitHubRepositoryAnalyzer
         from static_analyzer.vulnerability_scanner.ai_app_scanner import AIAppSecurityScanner
 
-        logger.info("Orchestrator: starting static scan", github_url=github_url)
-
+        logger.info("Static scan", github_url=github_url)
         analyzer = GitHubRepositoryAnalyzer(github_url, gemini_client=self.gemini_client)
         app_config = await analyzer.analyze_repository()
         scanner = AIAppSecurityScanner(app_config)
-        scan_result = await scanner.scan()
-
-        logger.info("Orchestrator: static scan complete", score=scan_result.get("security_score"))
-        return scan_result
+        result = await scanner.scan()
+        logger.info("Static scan done", score=result.get("security_score"))
+        return result
 
     async def run_dynamic_attack(self, target_url: str) -> RedTeamReport:
-        """Execute the full dynamic red-team attack flow against target_url.
-
-        Steps:
-            1. Validate localhost-only
-            2. Recon the target page
-            3. Use Gemini to create an attack plan
-            4. Execute attacks via Playwright MCP
-            5. Compile report
-        """
-        # Guard
+        """Full dynamic attack: recon → plan → skills → report."""
         validate_localhost_url(target_url)
-
-        report = RedTeamReport(
-            report_id=str(uuid.uuid4()),
-            target_url=target_url,
-        )
+        report = RedTeamReport(target_url=target_url)
 
         server = PlaywrightMCPServer(headless=True)
         await server.start()
 
         try:
-            # --- Recon -------------------------------------------------------
-            logger.info("Orchestrator: starting recon", url=target_url)
-            await server.call_tool("browser_navigate", {"url": target_url})
-            html = (await server.call_tool("browser_get_html", {})).get("result", "")
-            text = (await server.call_tool("browser_get_text", {})).get("result", "")
+            # 1. Recon — single pass, data shared with every skill
+            logger.info("Recon phase", url=target_url)
+            recon = await self._run_recon(server, target_url)
 
-            # --- Attack Planning (Gemini) ------------------------------------
-            logger.info("Orchestrator: generating attack plan via Gemini")
-            plan = await self._generate_attack_plan(target_url, html, text)
+            # 2. Attack plan via Gemini
+            logger.info("Planning via Gemini")
+            plan = await self._generate_attack_plan(recon)
             report.attack_plan = plan
 
-            # --- Attack Execution --------------------------------------------
-            for attack_type in plan.priority_order:
-                attack_cls = ATTACK_REGISTRY.get(attack_type)
-                if attack_cls is None:
-                    logger.warning("Unknown attack type in plan", attack_type=attack_type)
+            # 3. Execute skills in priority order
+            registry = get_registry()
+            for skill_name in plan.priority_order:
+                skill_instance = registry.get(skill_name)
+                if skill_instance is None:
+                    logger.warning("Unknown skill in plan", skill=skill_name)
                     continue
 
-                logger.info("Orchestrator: executing attack", attack_type=attack_type)
+                logger.info("Running skill", skill=skill_name)
                 try:
-                    # Re-navigate to target before each attack
                     await server.call_tool("browser_navigate", {"url": target_url})
-                    attack_instance = attack_cls()
-                    result = await attack_instance.execute(server, target_url)
+                    result = await skill_instance.execute(server, target_url, recon=recon)
                     report.attack_results.append(result)
-                    logger.info(
-                        "Attack completed",
-                        attack_type=attack_type,
-                        success=result.success,
-                        evidence_count=len(result.evidence),
-                    )
+                    logger.info("Skill done", skill=skill_name, success=result.success)
                 except Exception as e:
-                    logger.error("Attack execution failed", attack_type=attack_type, error=str(e))
+                    logger.error("Skill failed", skill=skill_name, error=str(e))
                     report.attack_results.append(
-                        AttackResult(
-                            attack_type=attack_type,
+                        SkillResult(
+                            skill_name=skill_name,
                             success=False,
                             severity=ThreatLevel.LOW,
                             error=str(e),
                         )
                     )
 
-            # --- Scoring & Summary ------------------------------------------
+            # 4. Score + summary
             report.calculate_score()
             report.finished_at = datetime.utcnow().isoformat()
-            report.summary = self._build_summary(report)
+            report.summary = _build_summary(report)
 
         finally:
             await server.stop()
 
-        logger.info(
-            "Orchestrator: dynamic attack complete",
-            report_id=report.report_id,
-            score=report.overall_score,
-        )
+        logger.info("Dynamic attack complete", report_id=report.report_id, score=report.overall_score)
         return report
 
     async def run_full_red_team(
         self,
         target_url: str,
-        github_url: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Combined static + dynamic flow.
-
-        Args:
-            target_url: localhost URL of the running app (for dynamic attacks)
-            github_url: Optional GitHub repo URL (for static scan)
-        """
-        combined: Dict[str, Any] = {
+        github_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Combined static + dynamic in one call."""
+        combined: dict[str, Any] = {
             "red_team_id": str(uuid.uuid4()),
             "started_at": datetime.utcnow().isoformat(),
             "static": None,
             "dynamic": None,
         }
 
-        # Static phase (parallel-safe, but we await sequentially for simplicity)
         if github_url:
             try:
                 combined["static"] = await self.run_static_scan(github_url)
@@ -244,10 +174,9 @@ class AttackOrchestrator:
                 logger.error("Static scan failed", error=str(e))
                 combined["static"] = {"error": str(e)}
 
-        # Dynamic phase
         try:
             report = await self.run_dynamic_attack(target_url)
-            combined["dynamic"] = report.to_dict()
+            combined["dynamic"] = report.model_dump()
         except Exception as e:
             logger.error("Dynamic attack failed", error=str(e))
             combined["dynamic"] = {"error": str(e)}
@@ -255,86 +184,124 @@ class AttackOrchestrator:
         combined["finished_at"] = datetime.utcnow().isoformat()
         return combined
 
-    # --- Internal helpers ---------------------------------------------------
+    # --- Internal -----------------------------------------------------------
 
-    async def _generate_attack_plan(
-        self, target_url: str, page_html: str, page_text: str
-    ) -> AttackPlan:
-        """Use Gemini to decide which attacks to run and in what order."""
-        available_attacks = list(ATTACK_REGISTRY.keys())
+    async def _run_recon(self, server: PlaywrightMCPServer, target_url: str) -> ReconData:
+        """Gather structured reconnaissance in a single page visit."""
+        await server.call_tool("browser_navigate", {"url": target_url})
+
+        html = (await server.call_tool("browser_get_html", {})).get("result", "")
+        text = (await server.call_tool("browser_get_text", {})).get("result", "")
+
+        inputs = json.loads(
+            (
+                await server.call_tool(
+                    "browser_evaluate_js",
+                    {
+                        "script": (
+                            "() => JSON.stringify([...document.querySelectorAll("
+                            "  'input, textarea, [contenteditable]')]"
+                            "  .map(el => ({tag:el.tagName, type:el.type, name:el.name,"
+                            "    id:el.id, placeholder:el.placeholder||''})))"
+                        )
+                    },
+                )
+            ).get("result", "[]")
+        )
+
+        forms = json.loads(
+            (
+                await server.call_tool(
+                    "browser_evaluate_js",
+                    {
+                        "script": (
+                            "() => JSON.stringify([...document.querySelectorAll('form')].map((f,i) => ({"
+                            "  index:i, action:f.action, method:f.method,"
+                            "  hasCsrfToken:!![...f.elements].some(e =>"
+                            "    /csrf|token|_token|xsrf/.test((e.name||'').toLowerCase())),"
+                            "  inputCount:f.elements.length"
+                            "})))"
+                        )
+                    },
+                )
+            ).get("result", "[]")
+        )
+
+        cookies = json.loads(
+            (await server.call_tool("browser_get_cookies", {})).get("result", "[]")
+        )
+        local_storage = json.loads(
+            (await server.call_tool("browser_get_local_storage", {})).get("result", "{}")
+        )
+
+        return ReconData(
+            url=target_url,
+            html=html,
+            text=text,
+            inputs=inputs,
+            forms=forms,
+            cookies=cookies,
+            local_storage=local_storage,
+        )
+
+    async def _generate_attack_plan(self, recon: ReconData) -> AttackPlan:
+        """Gemini Flash picks which skills to run and in what order."""
+        available = get_registry().names()
 
         prompt = (
             f"あなたはAegisFlowのRedTeam攻撃プランナーです。\n"
-            f"以下の対象アプリの情報から、最も効果的な攻撃の組み合わせと優先順位を決定してください。\n\n"
-            f"対象URL: {target_url}\n"
-            f"ページテキスト(冒頭500文字): {page_text[:500]}\n"
-            f"ページHTML(冒頭2000文字): {page_html[:2000]}\n\n"
-            f"利用可能な攻撃タイプ: {available_attacks}\n\n"
-            f"以下のJSON形式で回答してください(他のテキストは不要):\n"
-            f'{{\n'
-            f'  "reasoning": "なぜこれらの攻撃を選んだか",\n'
-            f'  "selected_attacks": ["attack_type1", ...],\n'
-            f'  "priority_order": ["最優先", "2番目", ...]\n'
-            f'}}\n'
+            f"対象アプリの情報から最も効果的な攻撃の組み合わせと優先順位を決定してください。\n\n"
+            f"対象URL: {recon.url}\n"
+            f"ページテキスト(冒頭500文字): {recon.text[:500]}\n"
+            f"入力フィールド数: {len(recon.inputs)}\n"
+            f"フォーム数: {len(recon.forms)}\n"
+            f"Cookie数: {len(recon.cookies)}\n"
+            f"localStorage キー: {list(recon.local_storage.keys())}\n\n"
+            f"利用可能なスキル: {available}\n\n"
+            f"以下JSON形式で回答(他のテキスト不要):\n"
+            f'{{"reasoning":"なぜこれらを選んだか","selected_attacks":["name",...],"priority_order":["最優先",...]}}\n'
         )
 
         # TODO: 実際のVertex AI SDKを使用
-        # Gemini Flash で高速プランニング
         result = await self.gemini_client.analyze_with_flash(
             [{"type": "text", "text": prompt}]
         )
 
-        # Parse Gemini response — fallback to all attacks if parse fails
+        # Parse — fallback to full skill list
+        reasoning = result.get("reasoning", "")
         try:
-            # GeminiClient returns ThreatAnalysisResult-like dict; extract reasoning
-            reasoning = result.get("reasoning", "")
-            # Try to extract JSON from reasoning if it's embedded
-            import re
-
-            json_match = re.search(r"\{.*\}", reasoning, re.DOTALL)
-            if json_match:
-                plan_data = json.loads(json_match.group())
-            else:
-                plan_data = {
-                    "reasoning": reasoning or "Gemini plan (default)",
-                    "selected_attacks": available_attacks,
-                    "priority_order": available_attacks,
-                }
+            m = re.search(r"\{.*\}", reasoning, re.DOTALL)
+            plan_data: dict[str, Any] = json.loads(m.group()) if m else {}
         except Exception:
-            plan_data = {
-                "reasoning": "Default plan: run all available attack types",
-                "selected_attacks": available_attacks,
-                "priority_order": available_attacks,
-            }
+            plan_data = {}
 
         return AttackPlan(
-            plan_id=str(uuid.uuid4()),
-            target_url=target_url,
-            reasoning=plan_data.get("reasoning", ""),
-            selected_attacks=plan_data.get("selected_attacks", available_attacks),
-            priority_order=plan_data.get("priority_order", available_attacks),
+            target_url=recon.url,
+            reasoning=plan_data.get("reasoning", reasoning or "Default: run all skills"),
+            selected_attacks=plan_data.get("selected_attacks", available),
+            priority_order=plan_data.get("priority_order", available),
         )
 
-    @staticmethod
-    def _build_summary(report: RedTeamReport) -> str:
-        """Generate a human-readable summary string."""
-        total = len(report.attack_results)
-        confirmed = sum(1 for r in report.attack_results if r.success)
-        critical = sum(
-            1 for r in report.attack_results if r.success and r.severity == ThreatLevel.CRITICAL
-        )
-        high = sum(1 for r in report.attack_results if r.success and r.severity == ThreatLevel.HIGH)
 
-        lines = [
-            f"Red Team Report — {report.report_id}",
-            f"Target: {report.target_url}",
-            f"Overall Security Score: {report.overall_score}/100",
-            f"Attacks Executed: {total} | Vulnerabilities Confirmed: {confirmed}",
-            f"  Critical: {critical} | High: {high}",
-        ]
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-        for r in report.attack_results:
-            status = "VULNERABLE" if r.success else "SECURE"
-            lines.append(f"  [{status}] {r.attack_type} ({r.severity.value}) — {len(r.evidence)} findings")
 
-        return "\n".join(lines)
+def _build_summary(report: RedTeamReport) -> str:
+    total = len(report.attack_results)
+    confirmed = sum(1 for r in report.attack_results if r.success)
+    critical = sum(1 for r in report.attack_results if r.success and r.severity == ThreatLevel.CRITICAL)
+    high = sum(1 for r in report.attack_results if r.success and r.severity == ThreatLevel.HIGH)
+
+    lines = [
+        f"Red Team Report — {report.report_id}",
+        f"Target: {report.target_url}  |  Score: {report.overall_score}/100",
+        f"Executed: {total}  |  Confirmed: {confirmed}  |  Critical: {critical}  |  High: {high}",
+        "",
+    ]
+    for r in report.attack_results:
+        tag = "VULN" if r.success else "OK  "
+        lines.append(f"  [{tag}] {r.skill_name:<25} {r.severity.value:<10} {len(r.evidence)} findings")
+
+    return "\n".join(lines)

@@ -4,11 +4,9 @@ Endpoints:
     POST /scan/static        — GitHub repo static security scan
     POST /attack/dynamic     — Playwright-driven live attack against localhost app
     POST /attack/full        — Combined static + dynamic red-team pipeline
-    GET  /scenarios          — List all registered attack scenarios
-    POST /attack/scenario    — Run a single named scenario
+    GET  /scenarios          — List all registered attack skills
+    POST /attack/scenario    — Run a single skill by name
 """
-
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,6 +14,7 @@ from pydantic import BaseModel, Field
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
 from red_teaming.mcp_server.playwright_mcp import LocalhostGuardError
+from red_teaming.skills import get_registry
 from red_teaming.agents.attack_agent import RedTeamAgent
 from red_teaming.orchestrator.attack_orchestrator import AttackOrchestrator
 
@@ -25,7 +24,7 @@ router = APIRouter()
 
 
 # ---------------------------------------------------------------------------
-# Request / Response schemas
+# Request schemas
 # ---------------------------------------------------------------------------
 
 
@@ -39,12 +38,12 @@ class DynamicAttackRequest(BaseModel):
 
 class FullRedTeamRequest(BaseModel):
     target_url: str = Field(..., description="攻撃対象のURL (localhost のみ)")
-    github_url: Optional[str] = Field(None, description="静的スキャン用 GitHub URL (省略時はスキップ)")
+    github_url: str | None = Field(None, description="静的スキャン用 GitHub URL (省略時はスキップ)")
 
 
-class SingleScenarioRequest(BaseModel):
+class SingleSkillRequest(BaseModel):
     target_url: str = Field(..., description="攻撃対象のURL (localhost のみ)")
-    scenario_id: str = Field(..., description="実行するシナリオID (例: xss-001)")
+    skill_name: str = Field(..., description="実行するスキル名 (例: xss, sql_injection)")
 
 
 # ---------------------------------------------------------------------------
@@ -54,15 +53,9 @@ class SingleScenarioRequest(BaseModel):
 
 @router.post("/scan/static")
 async def static_scan(request: StaticScanRequest) -> dict:
-    """GitHub repositoryの静的セキュリティスキャン.
-
-    既存の static_analyzer パイプラインを Red Team オーケストレータ経由で実行する.
-    """
-    logger.info("Red Team static scan requested", github_url=request.github_url)
-
-    gemini_client = GeminiClient()
-    orchestrator = AttackOrchestrator(gemini_client)
-
+    """GitHub repositoryの静的セキュリティスキャン."""
+    logger.info("Static scan requested", github_url=request.github_url)
+    orchestrator = AttackOrchestrator(GeminiClient())
     try:
         result = await orchestrator.run_static_scan(request.github_url)
         return {"status": "completed", "result": result}
@@ -73,23 +66,13 @@ async def static_scan(request: StaticScanRequest) -> dict:
 
 @router.post("/attack/dynamic")
 async def dynamic_attack(request: DynamicAttackRequest) -> dict:
-    """Playwright MCP経由の動的攻撃実行.
-
-    - localhost-only ガード
-    - Gemini による攻撃プラン生成
-    - 全攻撃タイプの実行
-    - 統合レポート返却
-    """
-    logger.info("Red Team dynamic attack requested", target_url=request.target_url)
-
-    gemini_client = GeminiClient()
-    orchestrator = AttackOrchestrator(gemini_client)
-
+    """Playwright MCP経由の動的攻撃実行 (recon → Gemini plan → 全スキル → レポート)."""
+    logger.info("Dynamic attack requested", target_url=request.target_url)
+    orchestrator = AttackOrchestrator(GeminiClient())
     try:
         report = await orchestrator.run_dynamic_attack(request.target_url)
-        return {"status": "completed", "report": report.to_dict()}
+        return {"status": "completed", "report": report.model_dump()}
     except LocalhostGuardError as e:
-        logger.warning("Localhost guard blocked attack", reason=str(e))
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error("Dynamic attack error", error=str(e))
@@ -98,19 +81,9 @@ async def dynamic_attack(request: DynamicAttackRequest) -> dict:
 
 @router.post("/attack/full")
 async def full_red_team(request: FullRedTeamRequest) -> dict:
-    """静的スキャン + 動的攻撃の一貫パイプライン.
-
-    github_url が指定されている場合は静的スキャンも実行する.
-    """
-    logger.info(
-        "Full red team pipeline requested",
-        target_url=request.target_url,
-        github_url=request.github_url,
-    )
-
-    gemini_client = GeminiClient()
-    orchestrator = AttackOrchestrator(gemini_client)
-
+    """静的スキャン + 動的攻撃の一貫パイプライン."""
+    logger.info("Full pipeline requested", target=request.target_url, github=request.github_url)
+    orchestrator = AttackOrchestrator(GeminiClient())
     try:
         result = await orchestrator.run_full_red_team(
             target_url=request.target_url,
@@ -125,64 +98,44 @@ async def full_red_team(request: FullRedTeamRequest) -> dict:
 
 
 @router.get("/scenarios")
-async def list_scenarios(target_url: str = "http://localhost:8000") -> dict:
-    """登録されている攻撃シナリオの一覧を返す.
-
-    Query param: target_url (デフォルト: http://localhost:8000)
-    """
-    try:
-        gemini_client = GeminiClient()
-        agent = RedTeamAgent(gemini_client, target_endpoint=target_url)
-        scenarios = agent.get_attack_scenarios()
-        return {
-            "scenarios": [
-                {
-                    "scenario_id": s.scenario_id,
-                    "name": s.name,
-                    "description": s.description,
-                    "attack_type": s.attack_type,
-                    "severity": s.severity.value,
-                }
-                for s in scenarios
-            ]
-        }
-    except LocalhostGuardError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+async def list_scenarios() -> dict:
+    """登録されている全攻撃スキルの一覧を返す."""
+    registry = get_registry()
+    return {
+        "scenarios": [
+            {
+                "skill_name": s.skill_name,
+                "description": s.skill_description,
+                "severity": s.default_severity.value,
+            }
+            for s in registry.list_all()
+        ]
+    }
 
 
 @router.post("/attack/scenario")
-async def run_single_scenario(request: SingleScenarioRequest) -> dict:
-    """単一シナリオの実行.
+async def run_single_skill(request: SingleSkillRequest) -> dict:
+    """単一スキルの実行.
 
-    scenario_id で指定したシナリオだけを実行して結果を返す.
+    skill_name で指定したスキルだけを実行して結果を返す.
     """
-    logger.info(
-        "Single scenario attack requested",
-        target_url=request.target_url,
-        scenario_id=request.scenario_id,
-    )
+    logger.info("Single skill requested", skill=request.skill_name, target=request.target_url)
 
-    gemini_client = GeminiClient()
-
-    try:
-        agent = RedTeamAgent(gemini_client, target_endpoint=request.target_url)
-    except LocalhostGuardError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    # Find the matching scenario
-    scenarios = agent.get_attack_scenarios()
-    scenario = next((s for s in scenarios if s.scenario_id == request.scenario_id), None)
-
-    if scenario is None:
+    registry = get_registry()
+    if request.skill_name not in registry:
         raise HTTPException(
             status_code=404,
-            detail=f"Scenario '{request.scenario_id}' not found. "
-                   f"Available: {[s.scenario_id for s in scenarios]}",
+            detail=f"Skill '{request.skill_name}' not found. Available: {registry.names()}",
         )
 
     try:
-        result = await agent.execute_scenario(scenario)
-        return {"status": "completed", "result": result}
+        agent = RedTeamAgent(GeminiClient(), target_endpoint=request.target_url)
+    except LocalhostGuardError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    try:
+        result = await agent.execute_skill(request.skill_name)
+        return {"status": "completed", "result": result.model_dump()}
     except Exception as e:
-        logger.error("Scenario execution error", error=str(e))
+        logger.error("Skill execution error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
