@@ -5,6 +5,7 @@ from .security import (
     ThreatAnalysisResult,
     SecurityEvent,
     MultimodalInput,
+    ModalityType,
     PolicyRule,
     RBACPermission,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "ThreatAnalysisResult",
     "SecurityEvent",
     "MultimodalInput",
+    "ModalityType",
     "PolicyRule",
     "RBACPermission",
     "FeedbackEvent",
