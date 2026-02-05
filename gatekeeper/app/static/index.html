@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AegisFlow AI - Security Dashboard</title>
+    <title>Threat Drill - Security Dashboard</title>
     <style>
         * {
             margin: 0;
@@ -642,7 +642,7 @@
         <header>
             <div class="logo">
                 <div class="logo-icon">🛡️</div>
-                <h1>Aegis<span>Flow</span> AI</h1>
+                <h1>Threat<span>Drill</span></h1>
             </div>
             <div class="status-badge" id="systemStatus">
                 <div class="status-dot"></div>
@@ -797,15 +797,15 @@
                                 <div class="terminal-dot yellow"></div>
                                 <div class="terminal-dot green"></div>
                             </div>
-                            <div class="terminal-title">AegisFlow Red Team Terminal</div>
+                            <div class="terminal-title">Threat Drill Red Team Terminal</div>
                         </div>
                         <div class="terminal-body" id="terminalBody">
-                            <div class="terminal-line info">Welcome to AegisFlow Red Team Terminal</div>
+                            <div class="terminal-line info">Welcome to Threat Drill Red Team Terminal</div>
                             <div class="terminal-line info">Type 'help' for available commands</div>
                             <div class="terminal-line info">─────────────────────────────────────</div>
                         </div>
                         <div class="terminal-input">
-                            <span class="prompt">aegisflow&gt;</span>
+                            <span class="prompt">threatdrill&gt;</span>
                             <input type="text" id="terminalInput" placeholder="Enter command..." onkeypress="handleTerminalInput(event)">
                         </div>
                     </div>
@@ -884,7 +884,7 @@
         </div>
 
         <footer>
-            <p>AegisFlow AI Gatekeeper v1.0.0 | <a href="/docs">API Documentation</a> | <a href="/metrics">Metrics</a></p>
+            <p>Threat Drill Security Platform v1.0.0 | <a href="/docs">API Documentation</a> | <a href="/metrics">Metrics</a></p>
         </footer>
     </div>
 
@@ -1058,7 +1058,7 @@
             const terminal = document.getElementById('terminalBody');
             const line = document.createElement('div');
             line.className = 'terminal-line command';
-            line.innerHTML = `<span class="prompt">aegisflow&gt;</span> ${escapeHtml(cmd)}`;
+            line.innerHTML = `<span class="prompt">threatdrill&gt;</span> ${escapeHtml(cmd)}`;
             terminal.appendChild(line);
             terminal.scrollTop = terminal.scrollHeight;
         }

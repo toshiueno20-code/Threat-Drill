@@ -1,1 +1,1 @@
-"""Playwright MCP Server for AegisFlow Red Team."""
+"""Playwright MCP Server for Threat Drill Red Team."""

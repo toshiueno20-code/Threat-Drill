@@ -158,7 +158,7 @@ class RedTeamAgent:
 
         available = self.registry.names()
         prompt = (
-            f"あなたはAegisFlowのRedTeam攻撃シナリオジェネレータです。\n"
+            f"あなたはThreat DrillのRedTeam攻撃シナリオジェネレータです。\n"
             f"以下の最近の脆弱性情報から、対象アプリに適用できる攻撃スキルの組み合わせを提案してください。\n\n"
             f"既知の脆弱性: {recent_vulnerabilities}\n"
             f"既存スキル: {available}\n\n"

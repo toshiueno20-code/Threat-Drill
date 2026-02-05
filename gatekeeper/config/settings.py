@@ -26,10 +26,10 @@ class GatekeeperSettings(BaseSettings):
     firestore_database: str = Field(default="(default)")
 
     # Pub/Sub Settings
-    pubsub_security_events_topic: str = Field(default="aegisflow-security-events")
-    pubsub_feedback_loop_topic: str = Field(default="aegisflow-feedback-loop")
-    pubsub_policy_updates_topic: str = Field(default="aegisflow-policy-updates")
-    pubsub_red_team_findings_topic: str = Field(default="aegisflow-red-team-findings")
+    pubsub_security_events_topic: str = Field(default="threatdrill-security-events")
+    pubsub_feedback_loop_topic: str = Field(default="threatdrill-feedback-loop")
+    pubsub_policy_updates_topic: str = Field(default="threatdrill-policy-updates")
+    pubsub_red_team_findings_topic: str = Field(default="threatdrill-red-team-findings")
 
     # Server Settings
     host: str = Field(default="0.0.0.0")

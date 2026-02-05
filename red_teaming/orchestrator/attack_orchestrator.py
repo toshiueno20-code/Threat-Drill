@@ -249,7 +249,7 @@ class AttackOrchestrator:
         available = get_registry().names()
 
         prompt = (
-            f"あなたはAegisFlowのRedTeam攻撃プランナーです。\n"
+            f"あなたはThreat DrillのRedTeam攻撃プランナーです。\n"
             f"対象アプリの情報から最も効果的な攻撃の組み合わせと優先順位を決定してください。\n\n"
             f"対象URL: {recon.url}\n"
             f"ページテキスト(冒頭500文字): {recon.text[:500]}\n"

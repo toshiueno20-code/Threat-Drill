@@ -1,4 +1,4 @@
-"""Shared constants for AegisFlow AI."""
+"""Shared constants for Threat Drill."""
 
 # Gemini 3 Model Identifiers
 GEMINI_3_FLASH = "gemini-3-flash"
@@ -33,10 +33,10 @@ MAX_REQUESTS_PER_MINUTE = 1000
 MAX_REQUESTS_PER_HOUR = 50000
 
 # Pub/Sub Topics
-TOPIC_SECURITY_EVENTS = "aegisflow-security-events"
-TOPIC_FEEDBACK_LOOP = "aegisflow-feedback-loop"
-TOPIC_POLICY_UPDATES = "aegisflow-policy-updates"
-TOPIC_RED_TEAM_FINDINGS = "aegisflow-red-team-findings"
+TOPIC_SECURITY_EVENTS = "threatdrill-security-events"
+TOPIC_FEEDBACK_LOOP = "threatdrill-feedback-loop"
+TOPIC_POLICY_UPDATES = "threatdrill-policy-updates"
+TOPIC_RED_TEAM_FINDINGS = "threatdrill-red-team-findings"
 
 # Firestore Collections
 COLLECTION_POLICIES = "policies"

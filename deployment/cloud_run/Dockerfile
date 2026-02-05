@@ -1,4 +1,4 @@
-# AegisFlow AI Gatekeeper - Cloud Run Dockerfile
+# Threat Drill Gatekeeper - Cloud Run Dockerfile
 
 FROM python:3.11-slim
 
@@ -28,8 +28,8 @@ COPY . .
 EXPOSE 8080
 
 # 非rootユーザーの作成と切り替え
-RUN useradd -m -u 1000 aegisflow && chown -R aegisflow:aegisflow /app
-USER aegisflow
+RUN useradd -m -u 1000 threatdrill && chown -R threatdrill:threatdrill /app
+USER threatdrill
 
 # ヘルスチェック
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

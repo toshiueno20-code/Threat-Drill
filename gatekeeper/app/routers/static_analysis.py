@@ -24,7 +24,7 @@ class RepositoryScanRequest(BaseModel):
     repository_url: HttpUrl
     github_token: Optional[str] = None
     create_pr: bool = False
-    pr_branch_name: str = "aegisflow/security-fixes"
+    pr_branch_name: str = "threatdrill/security-fixes"
 
 
 class RepositoryScanResponse(BaseModel):
@@ -133,7 +133,7 @@ async def scan_repository(
                     pr_url = repo_analyzer.create_pull_request(
                         repo_url=str(request.repository_url),
                         branch_name=request.pr_branch_name,
-                        title="[AegisFlow] Security fixes for AI application",
+                        title="[Threat Drill] Security fixes for AI application",
                         body=html_summary,
                         files_to_update=files_to_update,
                     )

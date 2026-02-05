@@ -29,7 +29,7 @@ class DeepThinkAnalyzer:
     def _build_system_instruction(self) -> str:
         """システム命令の構築."""
         return """
-あなたはAegisFlow AIの深層分析エンジンです。
+あなたはThreat Drillの深層分析エンジンです。
 Gemini 3 Pro Deep Thinkモードの高度な推論能力を活用し、複雑な脅威を検出してください。
 
 重要事項:
