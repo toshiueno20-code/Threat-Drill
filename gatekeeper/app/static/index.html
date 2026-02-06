@@ -1000,13 +1000,18 @@
             const grid = document.getElementById('skillGrid');
             try {
                 const response = await fetch('/api/v1/red-team/scenarios');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API Error ${response.status}: ${errorText.slice(0, 200)}`);
+                }
                 const data = await response.json();
                 availableSkills = data.scenarios || [];
 
                 if (availableSkills.length === 0) {
                     grid.innerHTML = `<div class="empty-state">
                         <div class="icon">🔧</div>
-                        <div>No attack skills available</div>
+                        <div>No attack skills registered</div>
+                        <div style="font-size: 12px; margin-top: 8px;">Skills may not be loaded yet</div>
                     </div>`;
                     return;
                 }
@@ -1019,11 +1024,13 @@
                 `).join('');
 
                 document.getElementById('activeSkills').textContent = availableSkills.length;
+                terminalLog('success', `Loaded ${availableSkills.length} attack skills`);
             } catch (error) {
+                console.error('Skills loading error:', error);
                 grid.innerHTML = `<div class="empty-state">
                     <div class="icon">⚠️</div>
                     <div>Failed to load skills</div>
-                    <div style="font-size: 12px; margin-top: 8px;">${error.message}</div>
+                    <div style="font-size: 12px; margin-top: 8px; color: #ff6b6b;">${escapeHtml(error.message)}</div>
                 </div>`;
                 terminalLog('error', `Failed to load skills: ${error.message}`);
             }

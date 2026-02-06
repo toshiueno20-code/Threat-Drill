@@ -100,17 +100,23 @@ async def full_red_team(request: FullRedTeamRequest) -> dict:
 @router.get("/scenarios")
 async def list_scenarios() -> dict:
     """登録されている全攻撃スキルの一覧を返す."""
-    registry = get_registry()
-    return {
-        "scenarios": [
-            {
-                "skill_name": s.skill_name,
-                "description": s.skill_description,
-                "severity": s.default_severity.value,
-            }
-            for s in registry.list_all()
-        ]
-    }
+    try:
+        registry = get_registry()
+        skills_list = registry.list_all()
+        logger.info(f"Found {len(skills_list)} skills in registry")
+        return {
+            "scenarios": [
+                {
+                    "skill_name": s.skill_name,
+                    "description": s.skill_description,
+                    "severity": s.default_severity.value,
+                }
+                for s in skills_list
+            ]
+        }
+    except Exception as e:
+        logger.error("Failed to list scenarios", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to load skills: {str(e)}")
 
 
 @router.post("/attack/scenario")
