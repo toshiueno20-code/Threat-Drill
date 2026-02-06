@@ -1,4 +1,4 @@
-"""Structured logging utilities for AegisFlow AI."""
+"""Structured logging utilities for Threat Drill."""
 
 import logging
 import sys

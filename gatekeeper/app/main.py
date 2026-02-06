@@ -2,11 +2,14 @@
 
 import time
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
+
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import make_asgi_app
 
 from ..config import settings
@@ -21,7 +24,7 @@ metrics = MetricsCollector()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """アプリケーションのライフサイクル管理."""
-    logger.info("Starting AegisFlow Gatekeeper", version="1.0.0")
+    logger.info("Starting Threat Drill Gatekeeper", version="1.0.0")
 
     # 起動時の初期化
     try:
@@ -34,12 +37,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # シャットダウン時のクリーンアップ
-    logger.info("Shutting down AegisFlow Gatekeeper")
+    logger.info("Shutting down Threat Drill Gatekeeper")
 
 
 # FastAPIアプリケーション
 app = FastAPI(
-    title="AegisFlow AI Gatekeeper",
+    title="Threat Drill Security Platform",
     description="次世代AIエージェント専用の自己進化型セキュリティメッシュ",
     version="1.0.0",
     lifespan=lifespan,
@@ -115,17 +118,15 @@ async def log_requests(request: Request, call_next: Any) -> Response:
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     """ヘルスチェックエンドポイント."""
-    return {"status": "healthy", "service": "aegisflow-gatekeeper"}
+    return {"status": "healthy", "service": "threatdrill-gatekeeper"}
 
 
 @app.get("/ready")
 async def readiness_check() -> dict[str, str]:
     """レディネスチェックエンドポイント."""
     # TODO: Vertex AI, Firestoreへの接続確認
-    return {"status": "ready", "service": "aegisflow-gatekeeper"}
+    return {"status": "ready", "service": "threatdrill-gatekeeper"}
 
-
-from typing import Any  # noqa: E402
 
 from .routers import security, analysis, static_analysis, dynamic_proxy, red_team  # noqa: E402
 
@@ -147,3 +148,15 @@ app.include_router(
     prefix="/api/v1/red-team",
     tags=["red-team"],
 )
+
+# 静的ファイルとダッシュボード
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> FileResponse:
+    """ダッシュボードページを返す."""
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

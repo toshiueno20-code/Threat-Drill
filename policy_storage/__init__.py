@@ -1,1 +1,1 @@
-"""AegisFlow AI Policy Storage - Firestore Integration."""
+"""Threat Drill Policy Storage - Firestore Integration."""

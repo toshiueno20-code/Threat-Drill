@@ -33,7 +33,7 @@ class SelfCorrectionEngine:
     def _build_system_instruction(self) -> str:
         """システム命令の構築."""
         return """
-あなたはAegisFlow AIの自己修正エンジンです。
+あなたはThreat Drillの自己修正エンジンです。
 セキュリティイベントとフィードバックを分析し、防御ポリシーを自動的に改善してください。
 
 重要事項:

@@ -1,1 +1,1 @@
-"""AegisFlow AI Gatekeeper - FastAPI Security Proxy."""
+"""Threat Drill Gatekeeper - FastAPI Security Proxy."""

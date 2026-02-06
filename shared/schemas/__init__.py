@@ -1,10 +1,11 @@
-"""Shared Pydantic schemas for AegisFlow AI."""
+"""Shared Pydantic schemas for Threat Drill."""
 
 from .security import (
     ThreatLevel,
     ThreatAnalysisResult,
     SecurityEvent,
     MultimodalInput,
+    ModalityType,
     PolicyRule,
     RBACPermission,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "ThreatAnalysisResult",
     "SecurityEvent",
     "MultimodalInput",
+    "ModalityType",
     "PolicyRule",
     "RBACPermission",
     "FeedbackEvent",

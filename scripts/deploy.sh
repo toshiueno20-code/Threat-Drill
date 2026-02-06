@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AegisFlow AI Deployment Script for Google Cloud
+# Threat Drill Deployment Script for Google Cloud
 
 set -e
 
@@ -16,7 +16,7 @@ if [ -z "$GCP_REGION" ]; then
 fi
 
 echo "========================================"
-echo "AegisFlow AI - Google Cloud Deployment"
+echo "Threat Drill - Google Cloud Deployment"
 echo "========================================"
 echo "Project ID: $GCP_PROJECT_ID"
 echo "Region: $GCP_REGION"
@@ -35,10 +35,10 @@ gcloud services enable \
 
 # Artifact Registry リポジトリの作成
 echo "[2/7] Creating Artifact Registry repository..."
-gcloud artifacts repositories create aegisflow \
+gcloud artifacts repositories create threatdrill \
     --repository-format=docker \
     --location=$GCP_REGION \
-    --description="AegisFlow AI container images" \
+    --description="Threat Drill container images" \
     --project=$GCP_PROJECT_ID \
     || echo "Repository already exists, continuing..."
 
@@ -51,48 +51,48 @@ gcloud firestore databases create \
 
 # Pub/Sub トピックの作成
 echo "[4/7] Creating Pub/Sub topics..."
-gcloud pubsub topics create aegisflow-security-events --project=$GCP_PROJECT_ID || true
-gcloud pubsub topics create aegisflow-feedback-loop --project=$GCP_PROJECT_ID || true
-gcloud pubsub topics create aegisflow-policy-updates --project=$GCP_PROJECT_ID || true
-gcloud pubsub topics create aegisflow-red-team-findings --project=$GCP_PROJECT_ID || true
+gcloud pubsub topics create threatdrill-security-events --project=$GCP_PROJECT_ID || true
+gcloud pubsub topics create threatdrill-feedback-loop --project=$GCP_PROJECT_ID || true
+gcloud pubsub topics create threatdrill-policy-updates --project=$GCP_PROJECT_ID || true
+gcloud pubsub topics create threatdrill-red-team-findings --project=$GCP_PROJECT_ID || true
 
 # サービスアカウントの作成
 echo "[5/7] Creating service account..."
-gcloud iam service-accounts create aegisflow-gatekeeper \
-    --description="AegisFlow Gatekeeper service account" \
-    --display-name="AegisFlow Gatekeeper" \
+gcloud iam service-accounts create threatdrill-gatekeeper \
+    --description="Threat Drill Gatekeeper service account" \
+    --display-name="Threat Drill Gatekeeper" \
     --project=$GCP_PROJECT_ID \
     || echo "Service account already exists, continuing..."
 
 # IAM権限の付与
 echo "[6/7] Granting IAM permissions..."
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
-    --member="serviceAccount:aegisflow-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
+    --member="serviceAccount:threatdrill-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/aiplatform.user"
 
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
-    --member="serviceAccount:aegisflow-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
+    --member="serviceAccount:threatdrill-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/datastore.user"
 
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
-    --member="serviceAccount:aegisflow-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
+    --member="serviceAccount:threatdrill-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/pubsub.publisher"
 
 # Dockerイメージのビルドとプッシュ
 echo "[7/7] Building and pushing Docker image..."
-IMAGE_NAME="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/aegisflow/gatekeeper:latest"
+IMAGE_NAME="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/threatdrill/gatekeeper:latest"
 
 docker build -t $IMAGE_NAME -f deployment/cloud_run/Dockerfile .
 docker push $IMAGE_NAME
 
 # Cloud Runへのデプロイ
 echo "Deploying to Cloud Run..."
-gcloud run deploy aegisflow-gatekeeper \
+gcloud run deploy threatdrill-gatekeeper \
     --image=$IMAGE_NAME \
     --platform=managed \
     --region=$GCP_REGION \
     --allow-unauthenticated \
-    --service-account=aegisflow-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com \
+    --service-account=threatdrill-gatekeeper@$GCP_PROJECT_ID.iam.gserviceaccount.com \
     --min-instances=1 \
     --max-instances=100 \
     --cpu=2 \
@@ -102,7 +102,7 @@ gcloud run deploy aegisflow-gatekeeper \
     --project=$GCP_PROJECT_ID
 
 # デプロイ完了
-SERVICE_URL=$(gcloud run services describe aegisflow-gatekeeper \
+SERVICE_URL=$(gcloud run services describe threatdrill-gatekeeper \
     --region=$GCP_REGION \
     --project=$GCP_PROJECT_ID \
     --format='value(status.url)')

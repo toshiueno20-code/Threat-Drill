@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "aegisflow-ai"
+name = "threatdrill"
 version = "1.0.0"
 description = "次世代AIエージェント専用の自己進化型セキュリティメッシュ"
-authors = ["AegisFlow Team"]
+authors = ["Threat Drill Team"]
 license = "MIT"
 readme = "README.md"
 package-mode = false

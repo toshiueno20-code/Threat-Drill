@@ -1,1 +1,1 @@
-"""AegisFlow AI Intelligence Center - Gemini 3 Integration."""
+"""Threat Drill Intelligence Center - Gemini 3 Integration."""

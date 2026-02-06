@@ -1,1 +1,1 @@
-"""AegisFlow AI - Shared utilities and schemas."""
+"""Threat Drill - Shared utilities and schemas."""

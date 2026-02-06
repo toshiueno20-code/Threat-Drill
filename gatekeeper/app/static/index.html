@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Threat Drill - Security Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --bg-terminal: #0c1222;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #334155;
+            --terminal-green: #4ade80;
+            --terminal-red: #f87171;
+            --terminal-yellow: #fbbf24;
+            --terminal-cyan: #22d3ee;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .logo h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .logo span {
+            color: var(--primary);
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-card);
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.error {
+            background: var(--danger);
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .stat-icon.blue { background: rgba(99, 102, 241, 0.2); }
+        .stat-icon.green { background: rgba(16, 185, 129, 0.2); }
+        .stat-icon.yellow { background: rgba(245, 158, 11, 0.2); }
+        .stat-icon.red { background: rgba(239, 68, 68, 0.2); }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        /* Main Grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        /* Red Team Panel */
+        .attack-panel {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1400px) {
+            .attack-panel {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .attack-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 10px 14px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            border-color: var(--primary);
+        }
+
+        .form-group input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .skill-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .skill-btn {
+            padding: 10px 12px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 12px;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+
+        .skill-btn:hover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .skill-btn.active {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.2);
+        }
+
+        .skill-btn .skill-name {
+            font-weight: 600;
+            margin-bottom: 2px;
+            line-height: 1.3;
+        }
+
+        .skill-btn .skill-desc {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            line-height: 1.35;
+        }
+
+        .skill-btn .skill-severity {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .severity-critical { color: var(--danger) !important; }
+        .severity-high { color: var(--danger) !important; }
+        .severity-medium { color: var(--warning) !important; }
+        .severity-low { color: var(--terminal-cyan) !important; }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-dark);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #dc2626;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .btn-outline:hover:not(:disabled) {
+            background: var(--border);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        /* Terminal */
+        .terminal-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 500px;
+        }
+
+        .terminal {
+            background: var(--bg-terminal);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(0,0,0,0.3);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .terminal-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .terminal-dot.red { background: #ff5f57; }
+        .terminal-dot.yellow { background: #ffbd2e; }
+        .terminal-dot.green { background: #28c840; }
+
+        .terminal-title {
+            flex: 1;
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .terminal-body {
+            flex: 1;
+            padding: 16px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            overflow-y: auto;
+            max-height: 450px;
+        }
+
+        .terminal-line {
+            margin-bottom: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .terminal-line.command {
+            color: var(--terminal-cyan);
+        }
+
+        .terminal-line.success {
+            color: var(--terminal-green);
+        }
+
+        .terminal-line.error {
+            color: var(--terminal-red);
+        }
+
+        .terminal-line.warning {
+            color: var(--terminal-yellow);
+        }
+
+        .terminal-line.info {
+            color: var(--text-secondary);
+        }
+
+        .terminal-line .prompt {
+            color: var(--terminal-green);
+        }
+
+        .terminal-line .timestamp {
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .terminal-input {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(0,0,0,0.2);
+            border-top: 1px solid var(--border);
+        }
+
+        .terminal-input .prompt {
+            color: var(--terminal-green);
+            margin-right: 8px;
+        }
+
+        .terminal-input input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            outline: none;
+        }
+
+        /* Events Table */
+        .events-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .events-table th,
+        .events-table td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+
+        .events-table th {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .events-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .threat-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .threat-safe { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .threat-low { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+        .threat-medium { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .threat-high { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .threat-critical { background: rgba(239, 68, 68, 0.4); color: #fff; }
+
+        /* API List */
+        .api-list {
+            list-style: none;
+        }
+
+        .api-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .api-item:last-child {
+            border-bottom: none;
+        }
+
+        .api-method {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-right: 12px;
+            min-width: 45px;
+            text-align: center;
+        }
+
+        .api-method.get { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .api-method.post { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+
+        .api-path {
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Loading spinner */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        footer {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            border-top: 1px solid var(--border);
+            margin-top: 30px;
+        }
+
+        footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <div class="logo-icon">🛡️</div>
+                <h1>Threat<span>Drill</span></h1>
+            </div>
+            <div class="status-badge" id="systemStatus">
+                <div class="status-dot"></div>
+                <span>Checking...</span>
+            </div>
+        </header>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="dashboard">📊 Dashboard</button>
+            <button class="tab" data-tab="redteam">⚔️ Red Team</button>
+            <button class="tab" data-tab="api">🔌 API</button>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value" id="totalRequests">--</div>
+                            <div class="stat-label">Total Requests</div>
+                        </div>
+                        <div class="stat-icon blue">📊</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value" id="threatsBlocked">--</div>
+                            <div class="stat-label">Threats Blocked</div>
+                        </div>
+                        <div class="stat-icon red">🚫</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value" id="avgLatency">--</div>
+                            <div class="stat-label">Avg Latency (ms)</div>
+                        </div>
+                        <div class="stat-icon yellow">⚡</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div>
+                            <div class="stat-value" id="activeSkills">--</div>
+                            <div class="stat-label">Attack Skills</div>
+                        </div>
+                        <div class="stat-icon green">📋</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="main-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Recent Security Events</h2>
+                        <button class="btn btn-outline" onclick="fetchEvents()">Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <table class="events-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Type</th>
+                                    <th>Threat</th>
+                                    <th>Source</th>
+                                </tr>
+                            </thead>
+                            <tbody id="eventsBody">
+                                <tr><td colspan="4" class="empty-state">
+                                    <div class="icon">📭</div>
+                                    <div>No security events yet</div>
+                                </td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Quick Actions</h2>
+                    </div>
+                    <div class="card-body">
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <button class="btn btn-primary" onclick="switchTab('redteam')">⚔️ Launch Red Team Attack</button>
+                            <button class="btn btn-outline" onclick="window.open('/docs', '_blank')">📖 API Documentation</button>
+                            <button class="btn btn-outline" onclick="window.open('/metrics', '_blank')">📈 View Metrics</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Red Team Tab -->
+        <div id="redteam" class="tab-content">
+            <div class="attack-panel">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>⚔️ Attack Controls</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="attack-controls">
+                            <div class="form-group">
+                                <label>Target URL (localhost only)</label>
+                                <input type="text" id="targetUrl" placeholder="http://localhost:3000" value="http://localhost:8080">
+                            </div>
+
+                            <div class="form-group">
+                                <label>GitHub URL (optional for static scan)</label>
+                                <input type="text" id="githubUrl" placeholder="https://github.com/user/repo">
+                            </div>
+
+                            <div class="form-group">
+                                <label>Attack Mode</label>
+                                <select id="attackMode">
+                                    <option value="scenario">Single Skill</option>
+                                    <option value="dynamic">Full Dynamic Attack</option>
+                                    <option value="static">Static Scan Only</option>
+                                    <option value="full">Full Pipeline (Static + Dynamic)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" id="skillSelector">
+                                <label>Select Attack Skill</label>
+                                <div class="skill-grid" id="skillGrid">
+                                    <div class="empty-state">
+                                        <div class="spinner" style="margin: 0 auto 12px;"></div>
+                                        <div>Loading skills...</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="action-buttons">
+                                <button class="btn btn-danger" id="runAttackBtn" onclick="runAttack()">
+                                    ▶️ Run Attack
+                                </button>
+                                <button class="btn btn-outline" onclick="clearTerminal()">
+                                    🗑️ Clear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="terminal-container">
+                    <div class="terminal">
+                        <div class="terminal-header">
+                            <div class="terminal-dots">
+                                <div class="terminal-dot red"></div>
+                                <div class="terminal-dot yellow"></div>
+                                <div class="terminal-dot green"></div>
+                            </div>
+                            <div class="terminal-title">Threat Drill Red Team Terminal</div>
+                        </div>
+                        <div class="terminal-body" id="terminalBody">
+                            <div class="terminal-line info">Welcome to Threat Drill Red Team Terminal</div>
+                            <div class="terminal-line info">Type 'help' for available commands</div>
+                            <div class="terminal-line info">─────────────────────────────────────</div>
+                        </div>
+                        <div class="terminal-input">
+                            <span class="prompt">threatdrill&gt;</span>
+                            <input type="text" id="terminalInput" placeholder="Enter command..." onkeypress="handleTerminalInput(event)">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Tab -->
+        <div id="api" class="tab-content">
+            <div class="main-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Security Endpoints</h2>
+                        <a href="/docs" target="_blank" class="btn btn-primary">Open Swagger</a>
+                    </div>
+                    <div class="card-body">
+                        <ul class="api-list">
+                            <li class="api-item">
+                                <span class="api-method get">GET</span>
+                                <span class="api-path">/health</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method get">GET</span>
+                                <span class="api-path">/ready</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method post">POST</span>
+                                <span class="api-path">/api/v1/security/analyze</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method get">GET</span>
+                                <span class="api-path">/api/v1/security/events</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method post">POST</span>
+                                <span class="api-path">/api/v1/analysis/threat</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method post">POST</span>
+                                <span class="api-path">/api/v1/static-analysis/scan</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Red Team Endpoints</h2>
+                    </div>
+                    <div class="card-body">
+                        <ul class="api-list">
+                            <li class="api-item">
+                                <span class="api-method get">GET</span>
+                                <span class="api-path">/api/v1/red-team/scenarios</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method post">POST</span>
+                                <span class="api-path">/api/v1/red-team/scan/static</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method post">POST</span>
+                                <span class="api-path">/api/v1/red-team/attack/dynamic</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method post">POST</span>
+                                <span class="api-path">/api/v1/red-team/attack/full</span>
+                            </li>
+                            <li class="api-item">
+                                <span class="api-method post">POST</span>
+                                <span class="api-path">/api/v1/red-team/attack/scenario</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Threat Drill Security Platform v1.0.0 | <a href="/docs">API Documentation</a> | <a href="/metrics">Metrics</a></p>
+        </footer>
+    </div>
+
+    <script>
+        // State
+        let selectedSkill = null;
+        let isRunning = false;
+        let availableSkills = [];
+        const SKILLS_REQUEST_TIMEOUT_MS = 10000;
+        let securityEvents = [];
+        let stats = {
+            totalRequests: 0,
+            threatsBlocked: 0,
+            avgLatency: 0
+        };
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+        });
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+
+            if (tabId === 'redteam' && availableSkills.length === 0) {
+                loadSkills();
+            }
+        }
+
+        async function fetchWithTimeout(url, options = {}, timeoutMs = SKILLS_REQUEST_TIMEOUT_MS) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        // Health check
+        async function checkHealth() {
+            const statusBadge = document.getElementById('systemStatus');
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                if (data.status === 'healthy') {
+                    statusBadge.innerHTML = '<div class="status-dot"></div><span>System Online</span>';
+                } else {
+                    statusBadge.innerHTML = '<div class="status-dot error"></div><span>System Error</span>';
+                }
+            } catch (error) {
+                statusBadge.innerHTML = '<div class="status-dot error"></div><span>Connection Error</span>';
+            }
+        }
+
+        // Fetch real stats from API
+        async function fetchStats() {
+            try {
+                // Fetch skills count
+                const skillsResponse = await fetchWithTimeout('/api/v1/red-team/scenarios');
+                if (skillsResponse.ok) {
+                    const skillsData = await skillsResponse.json();
+                    availableSkills = skillsData.scenarios || [];
+                    document.getElementById('activeSkills').textContent = availableSkills.length;
+                }
+            } catch (error) {
+                console.error('Failed to fetch stats:', error);
+            }
+
+            // Display actual stats (these will be updated as events come in)
+            document.getElementById('totalRequests').textContent = stats.totalRequests || '--';
+            document.getElementById('threatsBlocked').textContent = stats.threatsBlocked || '--';
+            document.getElementById('avgLatency').textContent = stats.avgLatency || '--';
+        }
+
+        // Fetch real security events
+        async function fetchEvents() {
+            const tbody = document.getElementById('eventsBody');
+            try {
+                const response = await fetch('/api/v1/security/events');
+                if (response.ok) {
+                    const data = await response.json();
+                    securityEvents = data.events || [];
+
+                    if (securityEvents.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">
+                            <div class="icon">📭</div>
+                            <div>No security events yet</div>
+                        </td></tr>`;
+                        return;
+                    }
+
+                    // Update stats from events
+                    stats.totalRequests = securityEvents.length;
+                    stats.threatsBlocked = securityEvents.filter(e => e.blocked).length;
+
+                    tbody.innerHTML = securityEvents.slice(0, 10).map(e => `
+                        <tr>
+                            <td>${new Date(e.timestamp).toLocaleTimeString()}</td>
+                            <td>${e.type || 'Analysis'}</td>
+                            <td><span class="threat-badge threat-${e.threat_level || 'safe'}">${e.threat_level || 'safe'}</span></td>
+                            <td>${e.source_ip || '--'}</td>
+                        </tr>
+                    `).join('');
+
+                    // Update displayed stats
+                    document.getElementById('totalRequests').textContent = stats.totalRequests;
+                    document.getElementById('threatsBlocked').textContent = stats.threatsBlocked;
+                }
+            } catch (error) {
+                // API might not have events endpoint implemented yet
+                tbody.innerHTML = `<tr><td colspan="4" class="empty-state">
+                    <div class="icon">📭</div>
+                    <div>No security events yet</div>
+                </td></tr>`;
+            }
+        }
+
+        // Load attack skills from API
+        async function loadSkills() {
+            const grid = document.getElementById('skillGrid');
+            try {
+                const response = await fetchWithTimeout('/api/v1/red-team/scenarios');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API Error ${response.status}: ${errorText.slice(0, 200)}`);
+                }
+                const data = await response.json();
+                availableSkills = data.scenarios || [];
+
+                if (availableSkills.length === 0) {
+                    grid.innerHTML = `<div class="empty-state">
+                        <div class="icon">🔧</div>
+                        <div>No attack skills registered</div>
+                        <div style="font-size: 12px; margin-top: 8px;">Skills may not be loaded yet</div>
+                    </div>`;
+                    return;
+                }
+
+                grid.innerHTML = availableSkills.map(skill => `
+                    <button class="skill-btn" data-skill="${skill.skill_name}" onclick="selectSkill('${skill.skill_name}')">
+                        <div class="skill-name">${escapeHtml(skill.display_name || skill.skill_name)}</div>
+                        <div class="skill-desc">${escapeHtml(skill.description || '')}</div>
+                        <div class="skill-severity severity-${skill.severity}">${escapeHtml(skill.severity)}</div>
+                    </button>
+                `).join('');
+
+                document.getElementById('activeSkills').textContent = availableSkills.length;
+                terminalLog('success', `Loaded ${availableSkills.length} attack skills`);
+            } catch (error) {
+                const message = error && error.name === 'AbortError'
+                    ? `Request timeout after ${SKILLS_REQUEST_TIMEOUT_MS / 1000}s`
+                    : (error?.message || 'Unknown error');
+                console.error('Skills loading error:', error);
+                grid.innerHTML = `<div class="empty-state">
+                    <div class="icon">!</div>
+                    <div>Failed to load skills</div>
+                    <div style="font-size: 12px; margin-top: 8px; color: #ff6b6b;">${escapeHtml(message)}</div>
+                </div>`;
+                terminalLog('error', `Failed to load skills: ${message}`);
+            }
+        }
+
+        function selectSkill(skillName) {
+            selectedSkill = skillName;
+            document.querySelectorAll('.skill-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.skill === skillName);
+            });
+            const skillMeta = availableSkills.find(s => s.skill_name === skillName);
+            terminalLog('info', `Selected skill: ${skillMeta?.display_name || skillName}`);
+        }
+
+        // Attack mode change
+        document.getElementById('attackMode').addEventListener('change', function() {
+            const skillSelector = document.getElementById('skillSelector');
+            skillSelector.style.display = this.value === 'scenario' ? 'block' : 'none';
+            if (this.value === 'scenario' && availableSkills.length === 0) {
+                loadSkills();
+            }
+        });
+
+        // Terminal functions
+        function terminalLog(type, message) {
+            const terminal = document.getElementById('terminalBody');
+            const timestamp = new Date().toLocaleTimeString();
+            const line = document.createElement('div');
+            line.className = `terminal-line ${type}`;
+            line.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${escapeHtml(message)}`;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function terminalCommand(cmd) {
+            const terminal = document.getElementById('terminalBody');
+            const line = document.createElement('div');
+            line.className = 'terminal-line command';
+            line.innerHTML = `<span class="prompt">threatdrill&gt;</span> ${escapeHtml(cmd)}`;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function clearTerminal() {
+            const terminal = document.getElementById('terminalBody');
+            terminal.innerHTML = `
+                <div class="terminal-line info">Terminal cleared</div>
+                <div class="terminal-line info">─────────────────────────────────────</div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Run attack
+        async function runAttack() {
+            if (isRunning) return;
+
+            const targetUrl = document.getElementById('targetUrl').value;
+            const githubUrl = document.getElementById('githubUrl').value;
+            const mode = document.getElementById('attackMode').value;
+
+            if (!targetUrl) {
+                terminalLog('error', 'Target URL is required');
+                return;
+            }
+
+            if (mode === 'scenario' && !selectedSkill) {
+                terminalLog('error', 'Please select an attack skill');
+                return;
+            }
+
+            isRunning = true;
+            const btn = document.getElementById('runAttackBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner"></div> Running...';
+
+            let endpoint, body, cmdText;
+
+            switch (mode) {
+                case 'scenario':
+                    endpoint = '/api/v1/red-team/attack/scenario';
+                    body = { target_url: targetUrl, skill_name: selectedSkill };
+                    cmdText = `attack --skill ${selectedSkill} --target ${targetUrl}`;
+                    break;
+                case 'dynamic':
+                    endpoint = '/api/v1/red-team/attack/dynamic';
+                    body = { target_url: targetUrl };
+                    cmdText = `attack --mode dynamic --target ${targetUrl}`;
+                    break;
+                case 'static':
+                    endpoint = '/api/v1/red-team/scan/static';
+                    body = { github_url: githubUrl || targetUrl };
+                    cmdText = `scan --mode static --repo ${githubUrl || targetUrl}`;
+                    break;
+                case 'full':
+                    endpoint = '/api/v1/red-team/attack/full';
+                    body = { target_url: targetUrl, github_url: githubUrl || null };
+                    cmdText = `attack --mode full --target ${targetUrl}`;
+                    break;
+            }
+
+            terminalCommand(cmdText);
+            terminalLog('info', 'Initializing attack...');
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Attack failed');
+                }
+
+                terminalLog('success', '✓ Attack completed successfully');
+                terminalLog('info', '─────────────────────────────────────');
+
+                // Display results
+                if (data.result) {
+                    displayResult(data.result);
+                } else if (data.report) {
+                    displayResult(data.report);
+                } else {
+                    terminalLog('info', JSON.stringify(data, null, 2));
+                }
+
+                // Refresh events after attack
+                setTimeout(fetchEvents, 1000);
+
+            } catch (error) {
+                terminalLog('error', `✗ Error: ${error.message}`);
+            } finally {
+                isRunning = false;
+                btn.disabled = false;
+                btn.innerHTML = '▶️ Run Attack';
+            }
+        }
+
+        function displayResult(result) {
+            if (typeof result === 'object') {
+                if (result.skill_name) {
+                    terminalLog('info', `Skill: ${result.skill_name}`);
+                }
+                if (result.success !== undefined) {
+                    terminalLog(result.success ? 'success' : 'warning', `Success: ${result.success}`);
+                }
+                if (result.severity) {
+                    const severityColor = result.severity === 'high' ? 'error' : result.severity === 'medium' ? 'warning' : 'info';
+                    terminalLog(severityColor, `Severity: ${result.severity}`);
+                }
+                if (result.findings && result.findings.length > 0) {
+                    terminalLog('warning', `Findings: ${result.findings.length}`);
+                    result.findings.forEach((f, i) => {
+                        terminalLog('info', `  ${i + 1}. ${typeof f === 'string' ? f : JSON.stringify(f)}`);
+                    });
+                }
+                if (result.evidence) {
+                    terminalLog('info', `Evidence: ${result.evidence}`);
+                }
+                if (result.recommendation) {
+                    terminalLog('success', `Recommendation: ${result.recommendation}`);
+                }
+            } else {
+                terminalLog('info', String(result));
+            }
+        }
+
+        // Terminal input handler
+        function handleTerminalInput(event) {
+            if (event.key === 'Enter') {
+                const input = document.getElementById('terminalInput');
+                const cmd = input.value.trim();
+                input.value = '';
+
+                if (!cmd) return;
+
+                terminalCommand(cmd);
+
+                // Parse command
+                const parts = cmd.split(' ');
+                const command = parts[0].toLowerCase();
+
+                switch (command) {
+                    case 'help':
+                        terminalLog('info', 'Available commands:');
+                        terminalLog('info', '  help              - Show this help');
+                        terminalLog('info', '  clear             - Clear terminal');
+                        terminalLog('info', '  skills            - List available attack skills');
+                        terminalLog('info', '  attack <skill>    - Run attack with specified skill');
+                        terminalLog('info', '  status            - Show system status');
+                        break;
+                    case 'clear':
+                        clearTerminal();
+                        break;
+                    case 'skills':
+                        if (availableSkills.length === 0) {
+                            terminalLog('warning', 'No skills loaded. Loading...');
+                            loadSkills();
+                        } else {
+                            terminalLog('info', 'Available skills:');
+                            availableSkills.forEach(s => {
+                                terminalLog('info', `  - ${s.display_name || s.skill_name} [${s.skill_name}] (${s.severity})`);
+                            });
+                        }
+                        break;
+                    case 'attack':
+                        if (parts[1]) {
+                            selectedSkill = parts[1];
+                            document.getElementById('attackMode').value = 'scenario';
+                            runAttack();
+                        } else {
+                            terminalLog('error', 'Usage: attack <skill_name>');
+                        }
+                        break;
+                    case 'status':
+                        terminalLog('info', 'System Status: Online');
+                        terminalLog('info', `Skills loaded: ${availableSkills.length}`);
+                        terminalLog('info', `Target: ${document.getElementById('targetUrl').value}`);
+                        terminalLog('info', `Total requests: ${stats.totalRequests}`);
+                        terminalLog('info', `Threats blocked: ${stats.threatsBlocked}`);
+                        break;
+                    default:
+                        terminalLog('error', `Unknown command: ${command}. Type 'help' for available commands.`);
+                }
+            }
+        }
+
+        // Initialize
+        checkHealth();
+        fetchStats();
+        fetchEvents();
+        loadSkills();
+
+        // Periodic health check only
+        setInterval(checkHealth, 30000);
+    </script>
+</body>
+</html>

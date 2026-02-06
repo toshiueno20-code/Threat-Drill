@@ -12,93 +12,93 @@ class MetricsCollector:
         """メトリクスの初期化."""
         # リクエスト関連
         self.request_total = Counter(
-            "aegisflow_requests_total",
+            "threatdrill_requests_total",
             "Total number of security analysis requests",
             ["endpoint", "threat_level"],
         )
 
         self.request_duration = Histogram(
-            "aegisflow_request_duration_seconds",
+            "threatdrill_request_duration_seconds",
             "Request duration in seconds",
             ["endpoint", "model"],
         )
 
         # 脅威検知
         self.threats_detected = Counter(
-            "aegisflow_threats_detected_total",
+            "threatdrill_threats_detected_total",
             "Total number of threats detected",
             ["threat_level", "pattern_type"],
         )
 
         self.threats_blocked = Counter(
-            "aegisflow_threats_blocked_total",
+            "threatdrill_threats_blocked_total",
             "Total number of threats blocked",
             ["threat_level"],
         )
 
         # Gemini モデル使用
         self.model_invocations = Counter(
-            "aegisflow_model_invocations_total",
+            "threatdrill_model_invocations_total",
             "Total Gemini model invocations",
             ["model", "analysis_type"],
         )
 
         self.model_latency = Histogram(
-            "aegisflow_model_latency_seconds",
+            "threatdrill_model_latency_seconds",
             "Model inference latency",
             ["model"],
             buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0],
         )
 
         self.model_tokens_used = Counter(
-            "aegisflow_model_tokens_total",
+            "threatdrill_model_tokens_total",
             "Total tokens consumed",
             ["model"],
         )
 
         # Deep Think使用
         self.deep_think_activations = Counter(
-            "aegisflow_deep_think_activations_total",
+            "threatdrill_deep_think_activations_total",
             "Number of Deep Think mode activations",
             ["reason"],
         )
 
         # ポリシー更新
         self.policy_updates = Counter(
-            "aegisflow_policy_updates_total",
+            "threatdrill_policy_updates_total",
             "Total policy updates",
             ["update_type", "auto_generated"],
         )
 
         # キャッシュヒット率
         self.cache_hits = Counter(
-            "aegisflow_cache_hits_total",
+            "threatdrill_cache_hits_total",
             "Cache hits",
             ["cache_type"],
         )
 
         self.cache_misses = Counter(
-            "aegisflow_cache_misses_total",
+            "threatdrill_cache_misses_total",
             "Cache misses",
             ["cache_type"],
         )
 
         # システム健全性
         self.system_health = Gauge(
-            "aegisflow_system_health",
+            "threatdrill_system_health",
             "System health score (0-1)",
             ["component"],
         )
 
         # False positives/negatives
         self.false_positives = Counter(
-            "aegisflow_false_positives_total",
+            "threatdrill_false_positives_total",
             "False positive detections",
             ["pattern_type"],
         )
 
         self.false_negatives = Counter(
-            "aegisflow_false_negatives_total",
+            "threatdrill_false_negatives_total",
             "False negative (missed threats)",
             ["attack_type"],
         )

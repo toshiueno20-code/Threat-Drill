@@ -21,7 +21,7 @@ from shared.schemas import ThreatLevel
 from shared.constants import RED_TEAM_MAX_CONCURRENT_ATTACKS
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
-from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer, validate_localhost_url
+from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 from red_teaming.skills import get_registry, SkillResult
 from red_teaming.orchestrator.attack_orchestrator import AttackOrchestrator
 
@@ -31,11 +31,11 @@ logger = get_logger(__name__)
 class RedTeamAgent:
     """High-level red-team agent backed by the Skill registry + orchestrator.
 
-    All target URLs are validated as localhost-only at construction time.
+    Target URLs are verified via sandbox handshake at navigation time.
     """
 
     def __init__(self, gemini_client: GeminiClient, target_endpoint: str):
-        validate_localhost_url(target_endpoint)
+        # URL verification happens in PlaywrightMCPServer during navigation
         self.gemini_client = gemini_client
         self.target_endpoint = target_endpoint
         self.orchestrator = AttackOrchestrator(gemini_client)
@@ -158,7 +158,7 @@ class RedTeamAgent:
 
         available = self.registry.names()
         prompt = (
-            f"あなたはAegisFlowのRedTeam攻撃シナリオジェネレータです。\n"
+            f"あなたはThreat DrillのRedTeam攻撃シナリオジェネレータです。\n"
             f"以下の最近の脆弱性情報から、対象アプリに適用できる攻撃スキルの組み合わせを提案してください。\n\n"
             f"既知の脆弱性: {recent_vulnerabilities}\n"
             f"既存スキル: {available}\n\n"

@@ -75,7 +75,7 @@ class GitHubRepositoryAnalyzer:
         """
         try:
             if target_dir is None:
-                target_dir = tempfile.mkdtemp(prefix="aegisflow_")
+                target_dir = tempfile.mkdtemp(prefix="threatdrill_")
 
             logger.info(
                 "Cloning repository",
@@ -430,7 +430,7 @@ JSON形式で以下のように回答してください：
                     contents = repo.get_contents(file_path, ref=branch_name)
                     repo.update_file(
                         path=file_path,
-                        message=f"[AegisFlow] Security fix for {file_path}",
+                        message=f"[Threat Drill] Security fix for {file_path}",
                         content=new_content,
                         sha=contents.sha,
                         branch=branch_name,
@@ -439,7 +439,7 @@ JSON形式で以下のように回答してください：
                     # ファイルが存在しない場合は新規作成
                     repo.create_file(
                         path=file_path,
-                        message=f"[AegisFlow] Add security guardrails to {file_path}",
+                        message=f"[Threat Drill] Add security guardrails to {file_path}",
                         content=new_content,
                         branch=branch_name,
                     )

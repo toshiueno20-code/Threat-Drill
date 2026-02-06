@@ -30,7 +30,7 @@ class PrimaryFilterAnalyzer:
     def _build_system_instruction(self) -> str:
         """システム命令の構築."""
         return """
-あなたはAegisFlow AIのプライマリセキュリティフィルターです。
+あなたはThreat Drillのプライマリセキュリティフィルターです。
 Gemini 3 Flashの高速処理能力を活用し、リアルタイムで脅威を検出してください。
 
 重要事項:

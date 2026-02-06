@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from shared.schemas import ThreatLevel
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
-from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer, validate_localhost_url
+from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 from red_teaming.skills import get_registry, SkillResult, ReconData
 
 logger = get_logger(__name__)
@@ -102,7 +102,7 @@ class AttackOrchestrator:
 
     async def run_dynamic_attack(self, target_url: str) -> RedTeamReport:
         """Full dynamic attack: recon → plan → skills → report."""
-        validate_localhost_url(target_url)
+        # URL verification happens in PlaywrightMCPServer during navigation
         report = RedTeamReport(target_url=target_url)
 
         server = PlaywrightMCPServer(headless=True)
@@ -115,7 +115,7 @@ class AttackOrchestrator:
 
             # 2. Attack plan via Gemini
             logger.info("Planning via Gemini")
-            plan = await self._generate_attack_plan(recon)
+            plan = await self._generate_attack_plan(recon, static_findings=None)
             report.attack_plan = plan
 
             # 3. Execute skills in priority order
@@ -159,7 +159,12 @@ class AttackOrchestrator:
         target_url: str,
         github_url: str | None = None,
     ) -> dict[str, Any]:
-        """Combined static + dynamic in one call."""
+        """Combined static + dynamic in one call.
+
+        When both GitHub URL and target URL are provided, static analysis
+        results are used to inform the dynamic attack planning for more
+        effective attack scenarios.
+        """
         combined: dict[str, Any] = {
             "red_team_id": str(uuid.uuid4()),
             "started_at": datetime.utcnow().isoformat(),
@@ -167,15 +172,23 @@ class AttackOrchestrator:
             "dynamic": None,
         }
 
+        static_findings: dict[str, Any] | None = None
+
+        # 1. Static analysis (GitHub) - if provided
         if github_url:
             try:
+                logger.info("Running static analysis", github_url=github_url)
                 combined["static"] = await self.run_static_scan(github_url)
+                static_findings = combined["static"]
             except Exception as e:
                 logger.error("Static scan failed", error=str(e))
                 combined["static"] = {"error": str(e)}
 
+        # 2. Dynamic attack (informed by static findings if available)
         try:
-            report = await self.run_dynamic_attack(target_url)
+            report = await self._run_dynamic_attack_with_context(
+                target_url, static_findings
+            )
             combined["dynamic"] = report.model_dump()
         except Exception as e:
             logger.error("Dynamic attack failed", error=str(e))
@@ -183,6 +196,63 @@ class AttackOrchestrator:
 
         combined["finished_at"] = datetime.utcnow().isoformat()
         return combined
+
+    async def _run_dynamic_attack_with_context(
+        self,
+        target_url: str,
+        static_findings: dict[str, Any] | None = None,
+    ) -> RedTeamReport:
+        """Dynamic attack with optional static analysis context."""
+        report = RedTeamReport(target_url=target_url)
+
+        server = PlaywrightMCPServer(headless=True)
+        await server.start()
+
+        try:
+            # 1. Recon — single pass, data shared with every skill
+            logger.info("Recon phase", url=target_url)
+            recon = await self._run_recon(server, target_url)
+
+            # 2. Attack plan via Gemini (with static context if available)
+            logger.info("Planning via Gemini", has_static_context=static_findings is not None)
+            plan = await self._generate_attack_plan(recon, static_findings)
+            report.attack_plan = plan
+
+            # 3. Execute skills in priority order
+            registry = get_registry()
+            for skill_name in plan.priority_order:
+                skill_instance = registry.get(skill_name)
+                if skill_instance is None:
+                    logger.warning("Unknown skill in plan", skill=skill_name)
+                    continue
+
+                logger.info("Running skill", skill=skill_name)
+                try:
+                    await server.call_tool("browser_navigate", {"url": target_url})
+                    result = await skill_instance.execute(server, target_url, recon=recon)
+                    report.attack_results.append(result)
+                    logger.info("Skill done", skill=skill_name, success=result.success)
+                except Exception as e:
+                    logger.error("Skill failed", skill=skill_name, error=str(e))
+                    report.attack_results.append(
+                        SkillResult(
+                            skill_name=skill_name,
+                            success=False,
+                            severity=ThreatLevel.LOW,
+                            error=str(e),
+                        )
+                    )
+
+            # 4. Score + summary
+            report.calculate_score()
+            report.finished_at = datetime.utcnow().isoformat()
+            report.summary = _build_summary(report)
+
+        finally:
+            await server.stop()
+
+        logger.info("Dynamic attack complete", report_id=report.report_id, score=report.overall_score)
+        return report
 
     # --- Internal -----------------------------------------------------------
 
@@ -244,20 +314,48 @@ class AttackOrchestrator:
             local_storage=local_storage,
         )
 
-    async def _generate_attack_plan(self, recon: ReconData) -> AttackPlan:
-        """Gemini Flash picks which skills to run and in what order."""
+    async def _generate_attack_plan(
+        self,
+        recon: ReconData,
+        static_findings: dict[str, Any] | None = None,
+    ) -> AttackPlan:
+        """Gemini Flash picks which skills to run and in what order.
+
+        Args:
+            recon: Dynamic reconnaissance data from the target page
+            static_findings: Optional static analysis results from GitHub scan
+        """
         available = get_registry().names()
 
+        # Build context from static findings if available
+        static_context = ""
+        if static_findings:
+            vulnerabilities = static_findings.get("vulnerabilities", [])
+            security_score = static_findings.get("security_score", "N/A")
+            static_context = (
+                f"\n--- 静的分析結果 (GitHub) ---\n"
+                f"セキュリティスコア: {security_score}\n"
+                f"検出された脆弱性: {len(vulnerabilities)}件\n"
+            )
+            if vulnerabilities:
+                vuln_summary = ", ".join(
+                    v.get("type", "unknown") for v in vulnerabilities[:10]
+                )
+                static_context += f"脆弱性タイプ: {vuln_summary}\n"
+
         prompt = (
-            f"あなたはAegisFlowのRedTeam攻撃プランナーです。\n"
+            f"あなたはThreat DrillのRedTeam攻撃プランナーです。\n"
             f"対象アプリの情報から最も効果的な攻撃の組み合わせと優先順位を決定してください。\n\n"
+            f"--- 動的分析結果 (ページ情報) ---\n"
             f"対象URL: {recon.url}\n"
             f"ページテキスト(冒頭500文字): {recon.text[:500]}\n"
             f"入力フィールド数: {len(recon.inputs)}\n"
             f"フォーム数: {len(recon.forms)}\n"
             f"Cookie数: {len(recon.cookies)}\n"
-            f"localStorage キー: {list(recon.local_storage.keys())}\n\n"
+            f"localStorage キー: {list(recon.local_storage.keys())}\n"
+            f"{static_context}\n"
             f"利用可能なスキル: {available}\n\n"
+            f"静的分析と動的分析の両方を考慮して、攻撃計画を立ててください。\n"
             f"以下JSON形式で回答(他のテキスト不要):\n"
             f'{{"reasoning":"なぜこれらを選んだか","selected_attacks":["name",...],"priority_order":["最優先",...]}}\n'
         )
