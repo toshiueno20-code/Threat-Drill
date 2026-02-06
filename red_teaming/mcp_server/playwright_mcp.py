@@ -1,72 +1,29 @@
-"""Playwright MCP Server — localhost-only browser-automation tool server.
+"""Playwright MCP Server — browser-automation tool server with sandbox verification.
 
 Exposes browser-control tools via the Model Context Protocol (MCP) so that
 the Red Team AI can navigate pages, interact with forms, execute JS, and
-take screenshots — all restricted to localhost targets only.
+take screenshots — targeting verified sandbox environments only.
+
+Security Model:
+- Localhost URLs are allowed by default (for local development)
+- Cloud sandbox URLs must pass a challenge-response handshake
+- The target must implement /.well-known/threatdrill-sandbox endpoint
+- HMAC verification ensures only authorized sandboxes are attacked
 """
 
 import json
-import socket
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright, Page, BrowserContext
 
 from shared.utils import get_logger
+from .sandbox_verifier import (
+    SandboxVerifier,
+    SandboxVerificationError,
+    verify_sandbox,
+)
 
 logger = get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# URL Guard — localhost-only enforcement
-# ---------------------------------------------------------------------------
-
-
-class LocalhostGuardError(Exception):
-    """Raised when a target URL does not resolve to localhost."""
-
-
-def _resolve_host(hostname: str) -> List[str]:
-    """DNS-resolve hostname → list of IP strings."""
-    try:
-        results = socket.getaddrinfo(hostname, None)
-        return list({r[4][0] for r in results})
-    except socket.gaierror:
-        return []
-
-
-_LOCALHOST_IPS = {"127.0.0.1", "::1", "0.0.0.0"}
-
-
-def validate_localhost_url(url: str) -> str:
-    """Validate that *url* targets a localhost address.
-
-    Returns the validated URL on success.
-    Raises LocalhostGuardError if the target resolves to an external IP.
-    """
-    parsed = urlparse(url)
-    hostname = parsed.hostname
-
-    if not hostname:
-        raise LocalhostGuardError(f"Invalid URL (no hostname): {url}")
-
-    # Direct localhost names
-    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        return url
-
-    # DNS resolution check
-    resolved = _resolve_host(hostname)
-    if not resolved or not resolved_is_localhost(resolved):
-        raise LocalhostGuardError(
-            f"Target '{hostname}' resolves to {resolved or ['<unresolvable>']}, "
-            f"which is not localhost. Red Team attacks are restricted to localhost only."
-        )
-
-    return url
-
-
-def resolved_is_localhost(ips: List[str]) -> bool:
-    """True if ALL resolved IPs are localhost addresses."""
-    return all(ip in _LOCALHOST_IPS for ip in ips)
 
 
 # ---------------------------------------------------------------------------
@@ -76,11 +33,11 @@ def resolved_is_localhost(ips: List[str]) -> bool:
 MCP_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "browser_navigate",
-        "description": "Navigate the browser to a given URL. URL MUST be localhost.",
+        "description": "Navigate the browser to a given URL. URL must be localhost or a verified sandbox.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "Target URL (localhost only)"},
+                "url": {"type": "string", "description": "Target URL (localhost or verified sandbox)"},
             },
             "required": ["url"],
         },
@@ -254,9 +211,20 @@ class PlaywrightMCPServer:
         await server.start()          # launches browser
         result = await server.call_tool("browser_navigate", {"url": "..."})
         await server.stop()           # closes browser + playwright
+
+    Security:
+        - All target URLs are verified through sandbox handshake protocol
+        - Localhost URLs bypass verification (allow_localhost=True by default)
+        - Cloud sandbox URLs must implement /.well-known/threatdrill-sandbox
     """
 
-    def __init__(self, headless: bool = True, timeout_ms: int = 30_000):
+    def __init__(
+        self,
+        headless: bool = True,
+        timeout_ms: int = 30_000,
+        sandbox_secret: Optional[str] = None,
+        allow_localhost: bool = True,
+    ):
         self._headless = headless
         self._timeout_ms = timeout_ms
         self._playwright: Any = None
@@ -265,6 +233,11 @@ class PlaywrightMCPServer:
         self._page: Optional[Page] = None
         # Captured network responses (body, url, status) for exfil analysis
         self._network_log: List[Dict[str, Any]] = []
+        # Sandbox verifier for URL authorization
+        self._verifier = SandboxVerifier(
+            shared_secret=sandbox_secret,
+            allow_localhost=allow_localhost,
+        )
 
     # --- lifecycle ----------------------------------------------------------
 
@@ -334,8 +307,8 @@ class PlaywrightMCPServer:
             result = await handler(self, tool_input)
             return {"success": True, "result": result, "error": None}
 
-        except LocalhostGuardError as e:
-            logger.warning("Localhost guard blocked request", tool=tool_name, reason=str(e))
+        except SandboxVerificationError as e:
+            logger.warning("Sandbox verification blocked request", tool=tool_name, reason=str(e))
             return {"success": False, "result": None, "error": str(e)}
         except Exception as e:
             logger.error("Tool execution error", tool=tool_name, error=str(e))
@@ -354,9 +327,22 @@ class PlaywrightMCPServer:
 
 
 async def _navigate(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> str:
-    url = validate_localhost_url(inp["url"])
+    url = inp["url"]
+
+    # Verify sandbox authorization before navigation
+    verification = await server._verifier.verify(url)
+    if not verification.verified:
+        raise SandboxVerificationError(
+            f"Target URL not authorized: {verification.error}"
+        )
+
+    logger.info(
+        "Sandbox verified, navigating",
+        url=url,
+        environment=verification.environment,
+    )
     await server._page.goto(url, timeout=server._timeout_ms)
-    return f"Navigated to {url}"
+    return f"Navigated to {url} (env: {verification.environment})"
 
 
 async def _screenshot(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> str:
@@ -423,14 +409,21 @@ async def _get_cookies(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> str:
 
 
 async def _set_cookie(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> str:
+    from urllib.parse import urlparse
+
+    # Extract domain from current page URL
+    current_url = server._page.url
+    parsed = urlparse(current_url)
+    domain = parsed.hostname or "localhost"
+
     cookie: Dict[str, Any] = {
         "name": inp["name"],
         "value": inp["value"],
-        "domain": "localhost",
+        "domain": domain,
         "path": inp.get("path", "/"),
     }
     await server._context.add_cookies([cookie])
-    return f"Cookie '{inp['name']}' set"
+    return f"Cookie '{inp['name']}' set on domain '{domain}'"
 
 
 async def _get_local_storage(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> str:
