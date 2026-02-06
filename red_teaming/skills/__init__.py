@@ -10,6 +10,10 @@ Includes:
 - Authentication and authorization attacks
 """
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 from .base import (
     BaseSkill,
     SkillResult,
@@ -23,11 +27,24 @@ from .base import (
 )
 
 # Trigger @skill registration for all concrete skill modules
-from . import web_attacks as _web  # noqa: F401
-from . import ai_attacks as _ai  # noqa: F401
-from . import auth_attacks as _auth  # noqa: F401
-from . import owasp_web_attacks as _owasp_web  # noqa: F401
-from . import owasp_llm_attacks as _owasp_llm  # noqa: F401
+_skill_modules = [
+    ("web_attacks", "web_attacks"),
+    ("ai_attacks", "ai_attacks"),
+    ("auth_attacks", "auth_attacks"),
+    ("owasp_web_attacks", "owasp_web_attacks"),
+    ("owasp_llm_attacks", "owasp_llm_attacks"),
+]
+
+for _module_name, _display_name in _skill_modules:
+    try:
+        __import__(f"red_teaming.skills.{_module_name}", fromlist=[_module_name])
+        _logger.debug(f"Loaded skill module: {_display_name}")
+    except Exception as e:
+        _logger.error(f"Failed to load skill module {_display_name}: {e}")
+
+# Log registered skill count
+_registry = get_registry()
+_logger.info(f"Skills registered: {len(_registry)} skills loaded")
 
 __all__ = [
     "BaseSkill",
