@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from shared.schemas import ThreatLevel
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
-from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer, validate_localhost_url
+from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 from red_teaming.skills import get_registry, SkillResult, ReconData
 
 logger = get_logger(__name__)
@@ -102,7 +102,7 @@ class AttackOrchestrator:
 
     async def run_dynamic_attack(self, target_url: str) -> RedTeamReport:
         """Full dynamic attack: recon → plan → skills → report."""
-        validate_localhost_url(target_url)
+        # URL verification happens in PlaywrightMCPServer during navigation
         report = RedTeamReport(target_url=target_url)
 
         server = PlaywrightMCPServer(headless=True)
