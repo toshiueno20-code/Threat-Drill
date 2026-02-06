@@ -58,3 +58,20 @@ TRACE_SAMPLE_RATE = 0.1  # 10% sampling for production
 RED_TEAM_FREQUENCY_HOURS = 24
 RED_TEAM_MAX_CONCURRENT_ATTACKS = 5
 RED_TEAM_TEST_ENVIRONMENTS = ["staging", "canary"]
+
+# Blue Teaming Configuration
+BLUE_TEAM_MAX_CONCURRENT_DEFENSES = 10
+BLUE_TEAM_DETECTION_TIMEOUT_MS = 5000
+BLUE_TEAM_RESPONSE_TIMEOUT_MS = 10000
+
+# Purple Team Configuration
+PURPLE_TEAM_EXERCISE_TIMEOUT_SECONDS = 300
+
+# Pub/Sub Topics (Blue Team)
+TOPIC_BLUE_TEAM_ALERTS = "threatdrill-blue-team-alerts"
+TOPIC_PURPLE_TEAM_EXERCISES = "threatdrill-purple-team-exercises"
+
+# Firestore Collections (Blue Team)
+COLLECTION_DEFENSE_EVENTS = "defense_events"
+COLLECTION_INCIDENT_REPORTS = "incident_reports"
+COLLECTION_PURPLE_TEAM_EXERCISES = "purple_team_exercises"
