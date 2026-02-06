@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
-from red_teaming.mcp_server.playwright_mcp import LocalhostGuardError
+from red_teaming.mcp_server.sandbox_verifier import SandboxVerificationError
 from red_teaming.skills import get_registry
 from red_teaming.agents.attack_agent import RedTeamAgent
 from red_teaming.orchestrator.attack_orchestrator import AttackOrchestrator
@@ -33,16 +33,16 @@ class StaticScanRequest(BaseModel):
 
 
 class DynamicAttackRequest(BaseModel):
-    target_url: str = Field(..., description="攻撃対象のURL (localhost のみ)")
+    target_url: str = Field(..., description="攻撃対象のURL (localhost または検証済みサンドボックス)")
 
 
 class FullRedTeamRequest(BaseModel):
-    target_url: str = Field(..., description="攻撃対象のURL (localhost のみ)")
+    target_url: str = Field(..., description="攻撃対象のURL (localhost または検証済みサンドボックス)")
     github_url: str | None = Field(None, description="静的スキャン用 GitHub URL (省略時はスキップ)")
 
 
 class SingleSkillRequest(BaseModel):
-    target_url: str = Field(..., description="攻撃対象のURL (localhost のみ)")
+    target_url: str = Field(..., description="攻撃対象のURL (localhost または検証済みサンドボックス)")
     skill_name: str = Field(..., description="実行するスキル名 (例: xss, sql_injection)")
 
 
@@ -72,7 +72,7 @@ async def dynamic_attack(request: DynamicAttackRequest) -> dict:
     try:
         report = await orchestrator.run_dynamic_attack(request.target_url)
         return {"status": "completed", "report": report.model_dump()}
-    except LocalhostGuardError as e:
+    except SandboxVerificationError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error("Dynamic attack error", error=str(e))
@@ -90,7 +90,7 @@ async def full_red_team(request: FullRedTeamRequest) -> dict:
             github_url=request.github_url,
         )
         return {"status": "completed", "result": result}
-    except LocalhostGuardError as e:
+    except SandboxVerificationError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error("Full red team error", error=str(e))
@@ -130,7 +130,7 @@ async def run_single_skill(request: SingleSkillRequest) -> dict:
 
     try:
         agent = RedTeamAgent(GeminiClient(), target_endpoint=request.target_url)
-    except LocalhostGuardError as e:
+    except SandboxVerificationError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
     try:
