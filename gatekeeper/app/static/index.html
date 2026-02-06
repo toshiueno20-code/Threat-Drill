@@ -313,6 +313,14 @@
         .skill-btn .skill-name {
             font-weight: 600;
             margin-bottom: 2px;
+            line-height: 1.3;
+        }
+
+        .skill-btn .skill-desc {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            line-height: 1.35;
         }
 
         .skill-btn .skill-severity {
@@ -320,6 +328,7 @@
             color: var(--text-secondary);
         }
 
+        .severity-critical { color: var(--danger) !important; }
         .severity-high { color: var(--danger) !important; }
         .severity-medium { color: var(--warning) !important; }
         .severity-low { color: var(--terminal-cyan) !important; }
@@ -893,6 +902,7 @@
         let selectedSkill = null;
         let isRunning = false;
         let availableSkills = [];
+        const SKILLS_REQUEST_TIMEOUT_MS = 10000;
         let securityEvents = [];
         let stats = {
             totalRequests: 0,
@@ -916,6 +926,16 @@
             }
         }
 
+        async function fetchWithTimeout(url, options = {}, timeoutMs = SKILLS_REQUEST_TIMEOUT_MS) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
         // Health check
         async function checkHealth() {
             const statusBadge = document.getElementById('systemStatus');
@@ -936,7 +956,7 @@
         async function fetchStats() {
             try {
                 // Fetch skills count
-                const skillsResponse = await fetch('/api/v1/red-team/scenarios');
+                const skillsResponse = await fetchWithTimeout('/api/v1/red-team/scenarios');
                 if (skillsResponse.ok) {
                     const skillsData = await skillsResponse.json();
                     availableSkills = skillsData.scenarios || [];
@@ -999,7 +1019,7 @@
         async function loadSkills() {
             const grid = document.getElementById('skillGrid');
             try {
-                const response = await fetch('/api/v1/red-team/scenarios');
+                const response = await fetchWithTimeout('/api/v1/red-team/scenarios');
                 if (!response.ok) {
                     const errorText = await response.text();
                     throw new Error(`API Error ${response.status}: ${errorText.slice(0, 200)}`);
@@ -1018,21 +1038,25 @@
 
                 grid.innerHTML = availableSkills.map(skill => `
                     <button class="skill-btn" data-skill="${skill.skill_name}" onclick="selectSkill('${skill.skill_name}')">
-                        <div class="skill-name">${skill.skill_name}</div>
-                        <div class="skill-severity severity-${skill.severity}">${skill.severity}</div>
+                        <div class="skill-name">${escapeHtml(skill.display_name || skill.skill_name)}</div>
+                        <div class="skill-desc">${escapeHtml(skill.description || '')}</div>
+                        <div class="skill-severity severity-${skill.severity}">${escapeHtml(skill.severity)}</div>
                     </button>
                 `).join('');
 
                 document.getElementById('activeSkills').textContent = availableSkills.length;
                 terminalLog('success', `Loaded ${availableSkills.length} attack skills`);
             } catch (error) {
+                const message = error && error.name === 'AbortError'
+                    ? `Request timeout after ${SKILLS_REQUEST_TIMEOUT_MS / 1000}s`
+                    : (error?.message || 'Unknown error');
                 console.error('Skills loading error:', error);
                 grid.innerHTML = `<div class="empty-state">
-                    <div class="icon">⚠️</div>
+                    <div class="icon">!</div>
                     <div>Failed to load skills</div>
-                    <div style="font-size: 12px; margin-top: 8px; color: #ff6b6b;">${escapeHtml(error.message)}</div>
+                    <div style="font-size: 12px; margin-top: 8px; color: #ff6b6b;">${escapeHtml(message)}</div>
                 </div>`;
-                terminalLog('error', `Failed to load skills: ${error.message}`);
+                terminalLog('error', `Failed to load skills: ${message}`);
             }
         }
 
@@ -1041,13 +1065,17 @@
             document.querySelectorAll('.skill-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.skill === skillName);
             });
-            terminalLog('info', `Selected skill: ${skillName}`);
+            const skillMeta = availableSkills.find(s => s.skill_name === skillName);
+            terminalLog('info', `Selected skill: ${skillMeta?.display_name || skillName}`);
         }
 
         // Attack mode change
         document.getElementById('attackMode').addEventListener('change', function() {
             const skillSelector = document.getElementById('skillSelector');
             skillSelector.style.display = this.value === 'scenario' ? 'block' : 'none';
+            if (this.value === 'scenario' && availableSkills.length === 0) {
+                loadSkills();
+            }
         });
 
         // Terminal functions
@@ -1235,7 +1263,7 @@
                         } else {
                             terminalLog('info', 'Available skills:');
                             availableSkills.forEach(s => {
-                                terminalLog('info', `  - ${s.skill_name} (${s.severity})`);
+                                terminalLog('info', `  - ${s.display_name || s.skill_name} [${s.skill_name}] (${s.severity})`);
                             });
                         }
                         break;
@@ -1265,6 +1293,7 @@
         checkHealth();
         fetchStats();
         fetchEvents();
+        loadSkills();
 
         // Periodic health check only
         setInterval(checkHealth, 30000);

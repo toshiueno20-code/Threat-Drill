@@ -13,6 +13,7 @@ Implements security testing capabilities for:
 - A10:2025 Server-Side Request Forgery (SSRF)
 """
 
+import base64
 import json
 import re
 import time
@@ -408,6 +409,409 @@ class AuthenticationFailuresSkill(BaseSkill):
         if len(responses) == 2 and responses[0] != responses[1]:
             evidence.append("Username enumeration possible - different error messages for valid/invalid users")
             record(timeline, "success", "Username enumeration")
+
+        return SkillResult(
+            skill_name=self.skill_name,
+            success=bool(evidence),
+            severity=self.default_severity,
+            evidence=evidence,
+            timeline=timeline,
+            duration_ms=round((time.time() - start) * 1000, 2),
+        )
+
+
+# ===========================================================================
+# A03:2025 - Injection
+# ===========================================================================
+
+
+@skill
+class InjectionSkill(BaseSkill):
+    """OWASP A03:2025 - Injection (SQL/Command/Template style probes)."""
+
+    skill_name = "owasp_a03_injection"
+    skill_description = "OWASP A03:2025 - Injection across URL params and form inputs"
+    default_severity = ThreatLevel.CRITICAL
+
+    _PAYLOADS = [
+        "' OR '1'='1",
+        "\" OR \"1\"=\"1",
+        "${7*7}",
+        "{{7*7}}",
+        "<script>window.__OWASP_A03_PROBE__=1</script>",
+        ";cat /etc/passwd",
+    ]
+
+    _SQL_ERROR_HINTS = [
+        "sql syntax",
+        "unterminated quoted string",
+        "you have an error in your sql syntax",
+        "sqlite error",
+        "postgresql",
+        "mysql",
+        "syntax error near",
+        "odbc",
+    ]
+
+    _CMD_HINTS = [
+        "root:x:0:0:",
+        "uid=",
+        "gid=",
+        "/bin/bash",
+    ]
+
+    _URL_PARAMS = ["id", "user", "search", "q", "filter", "sort", "where"]
+
+    async def execute(
+        self, server: Any, target_url: str, recon: ReconData | None = None
+    ) -> SkillResult:
+        timeline: list[TimelineEntry] = []
+        start = time.time()
+        evidence: list[str] = []
+        base = target_url.rstrip("/")
+
+        record(timeline, "phase", "Form Input Injection Probing")
+        inputs_js = await server.call_tool(
+            "browser_evaluate_js",
+            {"script": """() => JSON.stringify([...document.querySelectorAll(
+                'input[type=text], input[type=search], input[type=email], input[type=password], textarea'
+            )].map(el => ({id: el.id || '', name: el.name || ''})))"""}
+        )
+        inputs = json.loads(inputs_js.get("result", "[]"))
+
+        for inp in inputs[:4]:
+            selector = f"#{inp.get('id')}" if inp.get("id") else ""
+            if not selector and inp.get("name"):
+                selector = f"[name='{inp.get('name')}']"
+            if not selector:
+                continue
+
+            for payload in self._PAYLOADS[:4]:
+                await server.call_tool("browser_navigate", {"url": target_url})
+                await server.call_tool("browser_wait_for", {"delay_ms": 250})
+                try:
+                    await server.call_tool("browser_fill", {"selector": selector, "value": payload})
+                    await server.call_tool("browser_submit_form", {"selector": "form"})
+                except Exception:
+                    continue
+                await server.call_tool("browser_wait_for", {"delay_ms": 600})
+
+                text = (await server.call_tool("browser_get_text", {})).get("result", "").lower()
+                html = (await server.call_tool("browser_get_html", {})).get("result", "").lower()
+
+                if any(hint in text for hint in self._SQL_ERROR_HINTS):
+                    evidence.append(f"Injection error signature detected after payload in {selector}")
+                    record(timeline, "success", f"SQL error hint from {selector}")
+
+                if any(hint in text for hint in self._CMD_HINTS):
+                    evidence.append(f"Possible command injection output exposed from {selector}")
+                    record(timeline, "success", f"Command output hint from {selector}")
+
+                if "__owasp_a03_probe__" in html or "<script>window.__owasp_a03_probe__=1</script>" in html:
+                    evidence.append(f"Unescaped script payload reflected from {selector}")
+                    record(timeline, "success", f"Script payload reflected in {selector}")
+
+        record(timeline, "phase", "URL Parameter Injection Probing")
+        for param in self._URL_PARAMS[:5]:
+            for payload in self._PAYLOADS[:2]:
+                probe = f"{base}?{param}={payload}"
+                nav = await server.call_tool("browser_navigate", {"url": probe})
+                if not nav.get("success"):
+                    continue
+                await server.call_tool("browser_wait_for", {"delay_ms": 400})
+                text = (await server.call_tool("browser_get_text", {})).get("result", "").lower()
+                if any(hint in text for hint in self._SQL_ERROR_HINTS):
+                    evidence.append(f"Possible URL parameter injection via '{param}'")
+                    record(timeline, "success", f"URL injection: {param}")
+                    break
+
+        return SkillResult(
+            skill_name=self.skill_name,
+            success=bool(evidence),
+            severity=self.default_severity,
+            evidence=evidence,
+            timeline=timeline,
+            duration_ms=round((time.time() - start) * 1000, 2),
+        )
+
+
+# ===========================================================================
+# A04:2025 - Insecure Design
+# ===========================================================================
+
+
+@skill
+class InsecureDesignSkill(BaseSkill):
+    """OWASP A04:2025 - Insecure Design heuristic checks."""
+
+    skill_name = "owasp_a04_insecure_design"
+    skill_description = "OWASP A04:2025 - Business logic and trust-boundary design weaknesses"
+    default_severity = ThreatLevel.HIGH
+
+    _SENSITIVE_FIELDS = ["role", "is_admin", "price", "amount", "discount", "credit", "balance", "limit"]
+
+    async def execute(
+        self, server: Any, target_url: str, recon: ReconData | None = None
+    ) -> SkillResult:
+        timeline: list[TimelineEntry] = []
+        start = time.time()
+        evidence: list[str] = []
+        base = target_url.rstrip("/")
+
+        record(timeline, "phase", "Client-Side Trust Boundary Checks")
+        fields_js = await server.call_tool(
+            "browser_evaluate_js",
+            {"script": """() => JSON.stringify([...document.querySelectorAll('input,select,textarea')].map(el => ({
+                name: (el.name || '').toLowerCase(),
+                id: (el.id || '').toLowerCase(),
+                type: (el.type || '').toLowerCase(),
+                readOnly: !!el.readOnly,
+                hidden: ((el.type || '').toLowerCase() === 'hidden')
+            })))"""}
+        )
+        fields = json.loads(fields_js.get("result", "[]"))
+
+        for f in fields:
+            name = f.get("name", "")
+            fid = f.get("id", "")
+            if any(token in name or token in fid for token in self._SENSITIVE_FIELDS):
+                if f.get("hidden") or f.get("readOnly"):
+                    evidence.append(f"Sensitive business field appears client-side mutable: {name or fid}")
+                    record(timeline, "success", f"Sensitive field exposure: {name or fid}")
+
+        record(timeline, "phase", "Workflow Bypass Probing")
+        bypass_paths = ["/checkout/complete", "/order/success", "/payment/success", "/admin"]
+        for path in bypass_paths:
+            probe = base + path
+            nav = await server.call_tool("browser_navigate", {"url": probe})
+            if not nav.get("success"):
+                continue
+            await server.call_tool("browser_wait_for", {"delay_ms": 300})
+            text = (await server.call_tool("browser_get_text", {})).get("result", "").lower()
+            if any(ok in text for ok in ("success", "completed", "admin", "dashboard")) and not any(
+                deny in text for deny in ("login", "unauthorized", "forbidden", "403", "not found")
+            ):
+                evidence.append(f"Potential flow bypass path accessible directly: {path}")
+                record(timeline, "success", f"Workflow bypass: {path}")
+
+        record(timeline, "phase", "Parameter Tampering Probe")
+        tamper_probe = f"{base}?role=admin&is_admin=true&discount=99"
+        nav = await server.call_tool("browser_navigate", {"url": tamper_probe})
+        if nav.get("success"):
+            await server.call_tool("browser_wait_for", {"delay_ms": 300})
+            text = (await server.call_tool("browser_get_text", {})).get("result", "").lower()
+            if any(hit in text for hit in ("admin", "privilege", "discount", "approved")):
+                evidence.append("Parameter tampering may influence privileged/business state")
+                record(timeline, "success", "Tampering impact observed")
+
+        return SkillResult(
+            skill_name=self.skill_name,
+            success=bool(evidence),
+            severity=self.default_severity,
+            evidence=evidence,
+            timeline=timeline,
+            duration_ms=round((time.time() - start) * 1000, 2),
+        )
+
+
+# ===========================================================================
+# A06:2025 - Vulnerable and Outdated Components
+# ===========================================================================
+
+
+@skill
+class VulnerableOutdatedComponentsSkill(BaseSkill):
+    """OWASP A06:2025 - Detect likely outdated/vulnerable component usage."""
+
+    skill_name = "owasp_a06_vulnerable_components"
+    skill_description = "OWASP A06:2025 - Outdated client-side libraries and unpinned dependencies"
+    default_severity = ThreatLevel.HIGH
+
+    async def execute(
+        self, server: Any, target_url: str, recon: ReconData | None = None
+    ) -> SkillResult:
+        timeline: list[TimelineEntry] = []
+        start = time.time()
+        evidence: list[str] = []
+
+        record(timeline, "phase", "Dependency Fingerprinting")
+        html = recon.html if recon else (await server.call_tool("browser_get_html", {})).get("result", "")
+        scripts_js = await server.call_tool(
+            "browser_evaluate_js",
+            {"script": """() => JSON.stringify([...document.querySelectorAll('script[src]')].map(s => ({
+                src: s.src || '',
+                integrity: s.integrity || ''
+            })))"""}
+        )
+        scripts = json.loads(scripts_js.get("result", "[]"))
+
+        blob = (html + "\n" + "\n".join(s.get("src", "") for s in scripts)).lower()
+
+        version_checks: list[tuple[str, str, tuple[int, int, int]]] = [
+            (r"jquery(?:-|\.)(\d+)\.(\d+)\.(\d+)", "jQuery", (3, 5, 0)),
+            (r"bootstrap(?:-|\.)(\d+)\.(\d+)\.(\d+)", "Bootstrap", (4, 6, 0)),
+            (r"angular(?:\.min)?\.js\D*(\d+)\.(\d+)\.(\d+)", "AngularJS", (1, 8, 3)),
+            (r"vue(?:\.runtime)?(?:\.min)?\.js\D*(\d+)\.(\d+)\.(\d+)", "Vue", (3, 4, 0)),
+        ]
+
+        for pattern, name, min_ver in version_checks:
+            for match in re.finditer(pattern, blob):
+                found = tuple(int(match.group(i)) for i in (1, 2, 3))
+                if found < min_ver:
+                    evidence.append(f"Potentially outdated {name} detected: {found[0]}.{found[1]}.{found[2]}")
+                    record(timeline, "success", f"Outdated component: {name}")
+                    break
+
+        for script in scripts:
+            src = (script.get("src") or "").lower()
+            if ("@latest" in src or "/latest/" in src) and src.startswith("http"):
+                evidence.append(f"Unpinned dependency reference detected: {script.get('src')}")
+                record(timeline, "success", "Unpinned external dependency")
+
+        return SkillResult(
+            skill_name=self.skill_name,
+            success=bool(evidence),
+            severity=self.default_severity,
+            evidence=evidence,
+            timeline=timeline,
+            duration_ms=round((time.time() - start) * 1000, 2),
+        )
+
+
+# ===========================================================================
+# A08:2025 - Software and Data Integrity Failures
+# ===========================================================================
+
+
+@skill
+class DataIntegrityFailuresSkill(BaseSkill):
+    """OWASP A08:2025 - Software and Data Integrity Failures checks."""
+
+    skill_name = "owasp_a08_data_integrity_failures"
+    skill_description = "OWASP A08:2025 - Missing integrity controls, weak token/data trust model"
+    default_severity = ThreatLevel.HIGH
+
+    async def execute(
+        self, server: Any, target_url: str, recon: ReconData | None = None
+    ) -> SkillResult:
+        timeline: list[TimelineEntry] = []
+        start = time.time()
+        evidence: list[str] = []
+
+        record(timeline, "phase", "External Script Integrity Validation")
+        scripts_js = await server.call_tool(
+            "browser_evaluate_js",
+            {"script": """() => JSON.stringify([...document.querySelectorAll('script[src^="http"]')].map(s => ({
+                src: s.src || '',
+                integrity: s.integrity || ''
+            })))"""}
+        )
+        scripts = json.loads(scripts_js.get("result", "[]"))
+        for s in scripts:
+            src = s.get("src", "")
+            if src and not s.get("integrity"):
+                evidence.append(f"External script without Subresource Integrity: {src}")
+                record(timeline, "success", "Missing SRI on external script")
+
+        record(timeline, "phase", "JWT/Token Integrity Checks")
+        storage_raw = (await server.call_tool("browser_get_local_storage", {})).get("result", "{}")
+        storage = json.loads(storage_raw)
+        for key, value in storage.items():
+            if not isinstance(value, str):
+                continue
+            if value.count(".") == 2 and len(value) > 20:
+                header_b64 = value.split(".")[0]
+                padded = header_b64 + "=" * (-len(header_b64) % 4)
+                try:
+                    header = base64.urlsafe_b64decode(padded.encode()).decode("utf-8", errors="ignore").lower()
+                except Exception:
+                    continue
+                if '"alg":"none"' in header or "'alg':'none'" in header:
+                    evidence.append(f"Unsigned JWT token pattern detected in localStorage key '{key}'")
+                    record(timeline, "success", "JWT alg=none pattern")
+
+            key_l = key.lower()
+            if any(tok in key_l for tok in ("role", "permission", "policy", "feature_flag", "pricing")):
+                if value.startswith("{") or value.startswith("["):
+                    evidence.append(f"High-impact state stored client-side without integrity proof: {key}")
+                    record(timeline, "success", f"Client-trusted state: {key}")
+
+        return SkillResult(
+            skill_name=self.skill_name,
+            success=bool(evidence),
+            severity=self.default_severity,
+            evidence=evidence,
+            timeline=timeline,
+            duration_ms=round((time.time() - start) * 1000, 2),
+        )
+
+
+# ===========================================================================
+# A09:2025 - Security Logging and Monitoring Failures
+# ===========================================================================
+
+
+@skill
+class LoggingMonitoringFailuresSkill(BaseSkill):
+    """OWASP A09:2025 - Logging and monitoring gap heuristics."""
+
+    skill_name = "owasp_a09_logging_monitoring_failures"
+    skill_description = "OWASP A09:2025 - Missing brute-force throttling and weak detection signals"
+    default_severity = ThreatLevel.MEDIUM
+
+    async def execute(
+        self, server: Any, target_url: str, recon: ReconData | None = None
+    ) -> SkillResult:
+        timeline: list[TimelineEntry] = []
+        start = time.time()
+        evidence: list[str] = []
+
+        record(timeline, "phase", "Brute-Force Detection/Throttling Checks")
+        check_login = await server.call_tool(
+            "browser_evaluate_js",
+            {"script": """() => JSON.stringify({
+                hasUser: !!document.querySelector('input[name*=user i], input[name*=email i], input[type=email]'),
+                hasPassword: !!document.querySelector('input[type=password]')
+            })"""}
+        )
+        login = json.loads(check_login.get("result", "{}"))
+
+        if login.get("hasUser") and login.get("hasPassword"):
+            responses: list[str] = []
+            for i in range(5):
+                await server.call_tool("browser_navigate", {"url": target_url})
+                await server.call_tool("browser_wait_for", {"delay_ms": 250})
+                try:
+                    await server.call_tool(
+                        "browser_fill",
+                        {"selector": "input[name*=user i], input[name*=email i], input[type=email]", "value": "admin"}
+                    )
+                    await server.call_tool("browser_fill", {"selector": "input[type=password]", "value": f"wrong-{i}"})
+                    await server.call_tool("browser_submit_form", {"selector": "form"})
+                    await server.call_tool("browser_wait_for", {"delay_ms": 500})
+                    text = (await server.call_tool("browser_get_text", {})).get("result", "").lower()
+                    responses.append(text)
+                except Exception:
+                    continue
+
+            if responses:
+                full = " ".join(responses)
+                throttling_markers = ["too many", "rate limit", "temporarily blocked", "captcha", "try again later"]
+                if not any(marker in full for marker in throttling_markers):
+                    evidence.append("No visible brute-force throttling/lockout behavior after repeated failed login")
+                    record(timeline, "success", "Missing anti-bruteforce signal")
+        else:
+            record(timeline, "skip", "No login form detected")
+
+        record(timeline, "phase", "Security Event Endpoint Visibility Check")
+        probe = target_url.rstrip("/") + "/api/v1/security/events"
+        nav = await server.call_tool("browser_navigate", {"url": probe})
+        if nav.get("success"):
+            await server.call_tool("browser_wait_for", {"delay_ms": 250})
+            text = (await server.call_tool("browser_get_text", {})).get("result", "").lower()
+            if "[]" in text or "no security events" in text:
+                evidence.append("Security events endpoint appears empty or inaccessible for investigation context")
+                record(timeline, "warning", "Potential monitoring visibility gap")
 
         return SkillResult(
             skill_name=self.skill_name,

@@ -8,6 +8,8 @@ Endpoints:
     POST /attack/scenario    — Run a single skill by name
 """
 
+import re
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -21,6 +23,35 @@ from red_teaming.orchestrator.attack_orchestrator import AttackOrchestrator
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+_OWASP_WEB_RE = re.compile(r"^owasp_a(\d{2})_(.+)$")
+_OWASP_LLM_RE = re.compile(r"^owasp_llm(\d{2})_(.+)$")
+
+
+def _pretty_name(raw: str) -> str:
+    return raw.replace("_", " ").strip().title()
+
+
+def _derive_skill_meta(skill_name: str, description: str) -> dict[str, str | int]:
+    web = _OWASP_WEB_RE.match(skill_name)
+    if web:
+        idx = int(web.group(1))
+        title = description.split(" - ", 1)[-1].strip() if " - " in description else _pretty_name(web.group(2))
+        return {"display_name": f"OWASP Web A{idx:02d}: {title}", "category": "owasp_web", "order": idx}
+
+    llm = _OWASP_LLM_RE.match(skill_name)
+    if llm:
+        idx = int(llm.group(1))
+        title = description.split(" - ", 1)[-1].strip() if " - " in description else _pretty_name(llm.group(2))
+        return {"display_name": f"OWASP LLM{idx:02d}: {title}", "category": "owasp_llm", "order": idx}
+
+    return {"display_name": _pretty_name(skill_name), "category": "core", "order": 999}
+
+
+def _skill_sort_key(item: dict) -> tuple[int, int, str]:
+    rank = {"owasp_web": 0, "owasp_llm": 1, "core": 2}.get(item.get("category", "core"), 3)
+    return (rank, int(item.get("order", 999)), str(item.get("skill_name", "")))
 
 
 # ---------------------------------------------------------------------------
@@ -104,15 +135,22 @@ async def list_scenarios() -> dict:
         registry = get_registry()
         skills_list = registry.list_all()
         logger.info(f"Found {len(skills_list)} skills in registry")
-        return {
-            "scenarios": [
+        scenarios = []
+        for s in skills_list:
+            meta = _derive_skill_meta(s.skill_name, s.skill_description)
+            scenarios.append(
                 {
                     "skill_name": s.skill_name,
+                    "display_name": meta["display_name"],
                     "description": s.skill_description,
                     "severity": s.default_severity.value,
+                    "category": meta["category"],
+                    "order": meta["order"],
                 }
-                for s in skills_list
-            ]
+            )
+        scenarios.sort(key=_skill_sort_key)
+        return {
+            "scenarios": scenarios
         }
     except Exception as e:
         logger.error("Failed to list scenarios", error=str(e))
