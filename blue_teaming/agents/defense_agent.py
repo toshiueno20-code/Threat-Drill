@@ -42,12 +42,18 @@ class BlueTeamAgent:
 
     # --- Skill listing (router-facing) ----------------------------------------
 
+    @staticmethod
+    def _display_name(skill_name: str) -> str:
+        """Convert snake_case skill name to human-readable Title Case."""
+        return skill_name.replace("_", " ").title()
+
     def get_defense_scenarios(self) -> list[dict[str, str]]:
         """Return all registered defense skills as scenario-info dicts."""
         return [
             {
                 "scenario_id": s.skill_name,
                 "name": s.skill_name,
+                "display_name": self._display_name(s.skill_name),
                 "description": s.skill_description,
                 "category": s.category,
                 "alert_level": s.default_alert_level.value,
