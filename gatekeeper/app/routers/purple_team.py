@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from shared.utils import get_logger
+from shared.utils.target_allowlist import TargetNotAllowedError, validate_target_url
 from blue_teaming.agents.defense_agent import BlueTeamAgent
 from blue_teaming.orchestrator.defense_orchestrator import DefenseOrchestrator
 from blue_teaming.skills.base import (
@@ -41,6 +42,11 @@ class ValidationRequest(BaseModel):
 @router.post("/exercise")
 async def run_exercise(request: PurpleTeamExerciseRequest) -> dict:
     """Purple Team exercise — Red+Blue coordinated testing."""
+    if request.run_red_team:
+        try:
+            validate_target_url(request.target_url)
+        except TargetNotAllowedError as e:
+            raise HTTPException(status_code=403, detail=str(e))
     logger.info("Purple Team exercise started", target=request.target_url)
 
     exercise_id = str(uuid.uuid4())

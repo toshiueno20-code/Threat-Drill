@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from shared.utils import get_logger
+from shared.utils.target_allowlist import TargetNotAllowedError, validate_target_url
 from intelligence_center.models import GeminiClient
 from red_teaming.mcp_server.sandbox_verifier import SandboxVerificationError
 from red_teaming.skills import get_registry
@@ -98,6 +99,10 @@ async def static_scan(request: StaticScanRequest) -> dict:
 @router.post("/attack/dynamic")
 async def dynamic_attack(request: DynamicAttackRequest) -> dict:
     """Playwright MCP経由の動的攻撃実行 (recon → Gemini plan → 全スキル → レポート)."""
+    try:
+        validate_target_url(request.target_url)
+    except TargetNotAllowedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     logger.info("Dynamic attack requested", target_url=request.target_url)
     orchestrator = AttackOrchestrator(GeminiClient())
     try:
@@ -113,6 +118,10 @@ async def dynamic_attack(request: DynamicAttackRequest) -> dict:
 @router.post("/attack/full")
 async def full_red_team(request: FullRedTeamRequest) -> dict:
     """静的スキャン + 動的攻撃の一貫パイプライン."""
+    try:
+        validate_target_url(request.target_url)
+    except TargetNotAllowedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     logger.info("Full pipeline requested", target=request.target_url, github=request.github_url)
     orchestrator = AttackOrchestrator(GeminiClient())
     try:
@@ -163,6 +172,10 @@ async def run_single_skill(request: SingleSkillRequest) -> dict:
 
     skill_name で指定したスキルだけを実行して結果を返す.
     """
+    try:
+        validate_target_url(request.target_url)
+    except TargetNotAllowedError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     logger.info("Single skill requested", skill=request.skill_name, target=request.target_url)
 
     registry = get_registry()
