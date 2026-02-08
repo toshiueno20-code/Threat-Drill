@@ -1,6 +1,0 @@
-[
-  {"id": 1, "name": "田中太郎", "email": "tanaka@techcorp.jp", "role": "admin", "password_hash": "$2b$12$fake_hash_admin"},
-  {"id": 2, "name": "佐藤花子", "email": "sato@techcorp.jp", "role": "user", "password_hash": "$2b$12$fake_hash_user"},
-  {"id": 3, "name": "鈴木一郎", "email": "suzuki@techcorp.jp", "role": "user", "password_hash": "$2b$12$fake_hash_user2"},
-  {"id": 4, "name": "System Admin", "email": "admin@techcorp.jp", "role": "superadmin", "api_key": "sk-superadmin-FAKE-xyz789"}
-]
