@@ -1425,7 +1425,7 @@
                                             <option value="skill">Single Defense Skill</option>
                                         </select>
                                     </div>
-                                    <div class="field" id="defenseSkillSelector">
+                                    <div class="field" id="defenseSkillSelector" style="display:none">
                                         <label>Select Defense Skill</label>
                                         <div class="skill-grid" id="defenseSkillGrid">
                                             <div class="empty-state"><div class="spinner sp-blue"></div><div class="mt-2 text-sm">Loading skills...</div></div>
@@ -1724,8 +1724,8 @@
         if (tabEl) tabEl.classList.add('active');
         document.getElementById('pageTitle').textContent = tabTitles[tabId] || tabId;
 
-        if (tabId === 'redteam' && availableSkills.length === 0) loadSkills();
-        if (tabId === 'blueteam' && availableDefenseSkills.length === 0) loadDefenseSkills();
+        if (tabId === 'redteam') loadSkills();
+        if (tabId === 'blueteam') loadDefenseSkills();
         if (tabId === 'purpleteam') { fetchPurpleStatus(); fetchMitreCoverage(); }
     }
 
@@ -1835,18 +1835,18 @@
             const r = await api('/api/v1/red-team/scenarios');
             if (r.ok) {
                 const d = await r.json();
-                availableSkills = d.scenarios || [];
-                document.getElementById('activeAttackSkills').textContent = availableSkills.length;
-                document.getElementById('redSkillCount').textContent = availableSkills.length;
+                const skills = d.scenarios || [];
+                document.getElementById('activeAttackSkills').textContent = skills.length;
+                document.getElementById('redSkillCount').textContent = skills.length;
             }
         } catch {}
         try {
             const r = await api('/api/v1/blue-team/scenarios');
             if (r.ok) {
                 const d = await r.json();
-                availableDefenseSkills = d.scenarios || [];
-                document.getElementById('activeDefenseSkills').textContent = availableDefenseSkills.length;
-                document.getElementById('blueSkillCount').textContent = availableDefenseSkills.length;
+                const skills = d.scenarios || [];
+                document.getElementById('activeDefenseSkills').textContent = skills.length;
+                document.getElementById('blueSkillCount').textContent = skills.length;
             }
         } catch {}
         try {
@@ -1894,24 +1894,25 @@
     // ==================================================================
     // Red Team Skills
     // ==================================================================
+    let _redSkillsLoaded = false;
+
     async function loadSkills() {
+        if (_redSkillsLoaded && availableSkills.length > 0) {
+            _renderRedSkills();
+            return;
+        }
         const grid = document.getElementById('skillGrid');
         try {
             const r = await api('/api/v1/red-team/scenarios');
             if (!r.ok) throw new Error(`API Error ${r.status}`);
             const d = await r.json();
             availableSkills = d.scenarios || [];
+            _redSkillsLoaded = true;
             if (availableSkills.length === 0) {
                 grid.innerHTML = '<div class="empty-state"><div class="es-icon">&#x1f527;</div><div>No attack skills registered</div></div>';
                 return;
             }
-            grid.innerHTML = availableSkills.map(s => `
-                <button class="skill-btn sk-red" data-skill="${s.skill_name}" onclick="selectSkill('${s.skill_name}')">
-                    <div class="sk-name">${esc(s.display_name || s.skill_name)}</div>
-                    <div class="sk-desc">${esc(s.description || '')}</div>
-                    <div class="sk-meta sev-${s.severity}">${esc(s.severity)}</div>
-                </button>
-            `).join('');
+            _renderRedSkills();
             document.getElementById('activeAttackSkills').textContent = availableSkills.length;
             document.getElementById('redSkillCount').textContent = availableSkills.length;
             tlog('red', 'ok', `Loaded ${availableSkills.length} attack skills`);
@@ -1922,6 +1923,17 @@
         }
     }
 
+    function _renderRedSkills() {
+        const grid = document.getElementById('skillGrid');
+        grid.innerHTML = availableSkills.map(s => `
+            <button class="skill-btn sk-red" data-skill="${s.skill_name}" onclick="selectSkill('${s.skill_name}')">
+                <div class="sk-name">${esc(s.display_name || s.skill_name)}</div>
+                <div class="sk-desc">${esc(s.description || '')}</div>
+                <div class="sk-meta sev-${s.severity}">${esc(s.severity)}</div>
+            </button>
+        `).join('');
+    }
+
     function selectSkill(name) {
         selectedSkill = name;
         document.querySelectorAll('#skillGrid .skill-btn').forEach(b => b.classList.toggle('active', b.dataset.skill === name));
@@ -1930,30 +1942,31 @@
 
     document.getElementById('attackMode').addEventListener('change', function() {
         document.getElementById('skillSelector').style.display = this.value === 'scenario' ? 'block' : 'none';
-        if (this.value === 'scenario' && availableSkills.length === 0) loadSkills();
+        if (this.value === 'scenario') loadSkills();
     });
 
     // ==================================================================
     // Blue Team Skills
     // ==================================================================
+    let _blueSkillsLoaded = false;
+
     async function loadDefenseSkills() {
+        if (_blueSkillsLoaded && availableDefenseSkills.length > 0) {
+            _renderBlueSkills();
+            return;
+        }
         const grid = document.getElementById('defenseSkillGrid');
         try {
             const r = await api('/api/v1/blue-team/scenarios');
             if (!r.ok) throw new Error(`API Error ${r.status}`);
             const d = await r.json();
             availableDefenseSkills = d.scenarios || [];
+            _blueSkillsLoaded = true;
             if (availableDefenseSkills.length === 0) {
                 grid.innerHTML = '<div class="empty-state"><div class="es-icon">&#x1f527;</div><div>No defense skills registered</div></div>';
                 return;
             }
-            grid.innerHTML = availableDefenseSkills.map(s => `
-                <button class="skill-btn sk-blue" data-skill="${s.name}" onclick="selectDefenseSkill('${s.name}')">
-                    <div class="sk-name">${esc(s.name)}</div>
-                    <div class="sk-desc">${esc(s.description || '')}</div>
-                    <div class="sk-meta sev-${s.alert_level || 'info'}">${esc(s.category || '')}</div>
-                </button>
-            `).join('');
+            _renderBlueSkills();
             document.getElementById('activeDefenseSkills').textContent = availableDefenseSkills.length;
             document.getElementById('blueSkillCount').textContent = availableDefenseSkills.length;
             tlog('blue', 'ok', `Loaded ${availableDefenseSkills.length} defense skills`);
@@ -1964,6 +1977,17 @@
         }
     }
 
+    function _renderBlueSkills() {
+        const grid = document.getElementById('defenseSkillGrid');
+        grid.innerHTML = availableDefenseSkills.map(s => `
+            <button class="skill-btn sk-blue" data-skill="${s.name}" onclick="selectDefenseSkill('${s.name}')">
+                <div class="sk-name">${esc(s.name)}</div>
+                <div class="sk-desc">${esc(s.description || '')}</div>
+                <div class="sk-meta sev-${s.alert_level || 'info'}">${esc(s.category || '')}</div>
+            </button>
+        `).join('');
+    }
+
     function selectDefenseSkill(name) {
         selectedDefenseSkill = name;
         document.querySelectorAll('#defenseSkillGrid .skill-btn').forEach(b => b.classList.toggle('active', b.dataset.skill === name));
@@ -1972,7 +1996,7 @@
 
     document.getElementById('defenseMode').addEventListener('change', function() {
         document.getElementById('defenseSkillSelector').style.display = this.value === 'skill' ? 'block' : 'none';
-        if (this.value === 'skill' && availableDefenseSkills.length === 0) loadDefenseSkills();
+        if (this.value === 'skill') loadDefenseSkills();
     });
 
     // ==================================================================
