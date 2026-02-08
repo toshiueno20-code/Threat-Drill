@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "gemini-chatbot"
+version = "0.1.0"
+description = "Simple Gemini AI Chatbot - for security testing purposes"
+license = "MIT"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.109.0"
+uvicorn = {version = "^0.27.0", extras = ["standard"]}
+google-cloud-aiplatform = "^1.42.0"
+google-generativeai = "^0.8.0"
+pydantic = "^2.5.0"
+python-dotenv = "^1.0.0"
+jinja2 = "^3.1.2"
+aiofiles = "^23.2.1"
+httpx = "^0.26.0"
+python-multipart = "^0.0.6"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
