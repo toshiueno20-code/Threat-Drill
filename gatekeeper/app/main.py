@@ -128,7 +128,7 @@ async def readiness_check() -> dict[str, str]:
     return {"status": "ready", "service": "threatdrill-gatekeeper"}
 
 
-from .routers import security, analysis, static_analysis, dynamic_proxy, red_team  # noqa: E402
+from .routers import security, analysis, static_analysis, dynamic_proxy, red_team, blue_team, purple_team  # noqa: E402
 
 # ルーターの登録
 app.include_router(security.router, prefix="/api/v1/security", tags=["security"])
@@ -147,6 +147,16 @@ app.include_router(
     red_team.router,
     prefix="/api/v1/red-team",
     tags=["red-team"],
+)
+app.include_router(
+    blue_team.router,
+    prefix="/api/v1/blue-team",
+    tags=["blue-team"],
+)
+app.include_router(
+    purple_team.router,
+    prefix="/api/v1/purple-team",
+    tags=["purple-team"],
 )
 
 # 静的ファイルとダッシュボード
