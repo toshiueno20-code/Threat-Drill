@@ -1,15 +1,19 @@
 """Attack Orchestrator — unified static (GitHub) + dynamic (URL) red-team flow.
 
-Architecture
-------------
-1. [Recon]   Navigate once → collect structured ``ReconData``.
-2. [Plan]    Feed recon into Gemini 3 Flash → ``AttackPlan`` (ordered skill list).
-3. [Execute] Run each skill in priority order, passing recon so skills skip
-             redundant page-fetches.
-4. [Report]  Aggregate ``SkillResult`` list → score → ``RedTeamReport``.
+Architecture (v2 — Gemini plans, Local LLM executes)
+-----------------------------------------------------
+1. [Recon]    Navigate once → collect structured ``ReconData``.
+2. [Plan]     Gemini 3 Flash → ``AttackPlan`` (ordered skill list).
+3. [Execute]  Local LLM (Ollama) ReAct loop → autonomous MCP tool usage.
+              Falls back to legacy hardcoded skills if Ollama unavailable.
+4. [Analyze]  Gemini analyzes results → vulnerability assessment.
+5. [Report]   Aggregate results → score → ``RedTeamReport``.
 
-All data-transfer objects are Pydantic v2 ``BaseModel`` so the router can
-serialise them with a single ``model_dump()`` call.
+Separation of concerns:
+  - Gemini  = Planning + Analysis (no direct attack execution)
+  - Ollama  = Autonomous attack execution via ReAct + MCP tools
+  - Skills  = Knowledge layer (payloads, criteria, instructions)
+  - MCP     = Playwright browser automation (capability layer)
 """
 
 import json
@@ -22,9 +26,12 @@ from pydantic import BaseModel, Field
 
 from shared.schemas import ThreatLevel
 from shared.utils import get_logger
+from shared.llm import OllamaClient
 from intelligence_center.models import GeminiClient
 from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 from red_teaming.skills import get_registry, SkillResult, ReconData
+from red_teaming.skills.knowledge import SKILL_INDEX, get_skill, list_skills
+from red_teaming.agents.react_executor import ReActExecutor
 
 logger = get_logger(__name__)
 
@@ -80,10 +87,22 @@ class RedTeamReport(BaseModel):
 
 
 class AttackOrchestrator:
-    """Orchestrates the full red-team pipeline via the Skill registry."""
+    """Orchestrates the full red-team pipeline.
 
-    def __init__(self, gemini_client: GeminiClient):
+    Architecture v2:
+      - Gemini: planning + post-attack analysis
+      - Ollama (local LLM): autonomous skill execution via ReAct + MCP
+      - Fallback: legacy hardcoded skill execution if Ollama unavailable
+    """
+
+    def __init__(
+        self,
+        gemini_client: GeminiClient,
+        ollama_client: OllamaClient | None = None,
+    ):
         self.gemini_client = gemini_client
+        self.ollama_client = ollama_client or OllamaClient()
+        self.react_executor = ReActExecutor(self.ollama_client)
 
     # --- Public API ---------------------------------------------------------
 
@@ -101,58 +120,174 @@ class AttackOrchestrator:
         return result
 
     async def run_dynamic_attack(self, target_url: str) -> RedTeamReport:
-        """Full dynamic attack: recon → plan → skills → report."""
-        # URL verification happens in PlaywrightMCPServer during navigation
+        """Full dynamic attack: recon → plan (Gemini) → execute (Ollama ReAct) → analyze (Gemini).
+
+        Falls back to legacy hardcoded skill execution if Ollama is unavailable.
+        """
         report = RedTeamReport(target_url=target_url)
 
         server = PlaywrightMCPServer(headless=True)
         await server.start()
 
+        # Check if Ollama is available for ReAct execution
+        use_react = await self.ollama_client.is_available()
+        if use_react:
+            logger.info("Ollama available — using ReAct executor (autonomous mode)")
+        else:
+            logger.info("Ollama unavailable — falling back to legacy hardcoded skills")
+
         try:
-            # 1. Recon — single pass, data shared with every skill
+            # 1. Recon — single pass
             logger.info("Recon phase", url=target_url)
             recon = await self._run_recon(server, target_url)
 
-            # 2. Attack plan via Gemini
+            # 2. Attack plan via Gemini (planning only — no execution)
             logger.info("Planning via Gemini")
             plan = await self._generate_attack_plan(recon, static_findings=None)
             report.attack_plan = plan
 
-            # 3. Execute skills in priority order
-            registry = get_registry()
-            for skill_name in plan.priority_order:
-                skill_instance = registry.get(skill_name)
-                if skill_instance is None:
-                    logger.warning("Unknown skill in plan", skill=skill_name)
-                    continue
-
-                logger.info("Running skill", skill=skill_name)
-                try:
-                    await server.call_tool("browser_navigate", {"url": target_url})
-                    result = await skill_instance.execute(server, target_url, recon=recon)
-                    report.attack_results.append(result)
-                    logger.info("Skill done", skill=skill_name, success=result.success)
-                except Exception as e:
-                    logger.error("Skill failed", skill=skill_name, error=str(e))
-                    report.attack_results.append(
-                        SkillResult(
-                            skill_name=skill_name,
-                            success=False,
-                            severity=ThreatLevel.LOW,
-                            error=str(e),
-                        )
-                    )
+            # 3. Execute skills
+            if use_react:
+                # v2: Ollama ReAct executor — autonomous MCP usage
+                await self._execute_react(server, plan, target_url, report)
+            else:
+                # v1 fallback: legacy hardcoded skills
+                await self._execute_legacy(server, plan, target_url, recon, report)
 
             # 4. Score + summary
             report.calculate_score()
             report.finished_at = datetime.utcnow().isoformat()
             report.summary = _build_summary(report)
 
+            # 5. Post-attack analysis via Gemini
+            if report.attack_results:
+                analysis = await self._analyze_results(report)
+                if analysis:
+                    report.summary += f"\n\n--- Gemini Analysis ---\n{analysis}"
+
         finally:
             await server.stop()
 
         logger.info("Dynamic attack complete", report_id=report.report_id, score=report.overall_score)
         return report
+
+    async def _execute_react(
+        self,
+        server: PlaywrightMCPServer,
+        plan: AttackPlan,
+        target_url: str,
+        report: RedTeamReport,
+    ) -> None:
+        """Execute skills via Ollama ReAct executor (autonomous mode)."""
+        for skill_id in plan.priority_order:
+            skill_knowledge = get_skill(skill_id)
+            if skill_knowledge is None:
+                logger.warning("Unknown skill in plan (knowledge)", skill=skill_id)
+                continue
+
+            logger.info("ReAct executing skill", skill=skill_id)
+            try:
+                react_result = await self.react_executor.execute_skill(
+                    skill_id, target_url, server
+                )
+                # Convert ReAct result to SkillResult
+                severity_map = {
+                    "critical": ThreatLevel.CRITICAL,
+                    "high": ThreatLevel.HIGH,
+                    "medium": ThreatLevel.MEDIUM,
+                    "low": ThreatLevel.LOW,
+                }
+                report.attack_results.append(
+                    SkillResult(
+                        skill_name=skill_id,
+                        success=react_result.get("success", False),
+                        severity=severity_map.get(
+                            skill_knowledge.get("severity", "medium"),
+                            ThreatLevel.MEDIUM,
+                        ),
+                        evidence=react_result.get("evidence", []),
+                        timeline=[],
+                        duration_ms=react_result.get("duration_ms", 0),
+                    )
+                )
+                logger.info(
+                    "ReAct skill done",
+                    skill=skill_id,
+                    success=react_result.get("success"),
+                    iterations=react_result.get("iterations"),
+                )
+            except Exception as e:
+                logger.error("ReAct skill failed", skill=skill_id, error=str(e))
+                report.attack_results.append(
+                    SkillResult(
+                        skill_name=skill_id,
+                        success=False,
+                        severity=ThreatLevel.LOW,
+                        error=str(e),
+                    )
+                )
+
+    async def _execute_legacy(
+        self,
+        server: PlaywrightMCPServer,
+        plan: AttackPlan,
+        target_url: str,
+        recon: ReconData,
+        report: RedTeamReport,
+    ) -> None:
+        """Execute skills via legacy hardcoded Python logic (fallback)."""
+        registry = get_registry()
+        for skill_name in plan.priority_order:
+            skill_instance = registry.get(skill_name)
+            if skill_instance is None:
+                logger.warning("Unknown skill in plan (legacy)", skill=skill_name)
+                continue
+
+            logger.info("Legacy executing skill", skill=skill_name)
+            try:
+                await server.call_tool("browser_navigate", {"url": target_url})
+                result = await skill_instance.execute(server, target_url, recon=recon)
+                report.attack_results.append(result)
+                logger.info("Legacy skill done", skill=skill_name, success=result.success)
+            except Exception as e:
+                logger.error("Legacy skill failed", skill=skill_name, error=str(e))
+                report.attack_results.append(
+                    SkillResult(
+                        skill_name=skill_name,
+                        success=False,
+                        severity=ThreatLevel.LOW,
+                        error=str(e),
+                    )
+                )
+
+    async def _analyze_results(self, report: RedTeamReport) -> str:
+        """Gemini post-attack analysis — summarize findings and recommend fixes."""
+        findings = []
+        for r in report.attack_results:
+            if r.success:
+                findings.append(f"- {r.skill_name} ({r.severity.value}): {', '.join(r.evidence[:3])}")
+
+        if not findings:
+            return ""
+
+        prompt = (
+            "あなたはセキュリティアナリストです。以下のペネトレーションテスト結果を分析してください。\n\n"
+            f"対象: {report.target_url}\n"
+            f"スコア: {report.overall_score}/100\n\n"
+            "検出された脆弱性:\n"
+            + "\n".join(findings)
+            + "\n\n"
+            "各脆弱性の影響度と推奨される修正方法を簡潔に述べてください。"
+        )
+
+        try:
+            result = await self.gemini_client.analyze_with_flash(
+                [{"type": "text", "text": prompt}]
+            )
+            return result.get("reasoning", "")
+        except Exception as e:
+            logger.warning("Gemini analysis failed", error=str(e))
+            return ""
 
     async def run_full_red_team(
         self,
@@ -208,45 +343,34 @@ class AttackOrchestrator:
         server = PlaywrightMCPServer(headless=True)
         await server.start()
 
+        use_react = await self.ollama_client.is_available()
+
         try:
-            # 1. Recon — single pass, data shared with every skill
+            # 1. Recon
             logger.info("Recon phase", url=target_url)
             recon = await self._run_recon(server, target_url)
 
-            # 2. Attack plan via Gemini (with static context if available)
+            # 2. Attack plan via Gemini (with static context)
             logger.info("Planning via Gemini", has_static_context=static_findings is not None)
             plan = await self._generate_attack_plan(recon, static_findings)
             report.attack_plan = plan
 
-            # 3. Execute skills in priority order
-            registry = get_registry()
-            for skill_name in plan.priority_order:
-                skill_instance = registry.get(skill_name)
-                if skill_instance is None:
-                    logger.warning("Unknown skill in plan", skill=skill_name)
-                    continue
-
-                logger.info("Running skill", skill=skill_name)
-                try:
-                    await server.call_tool("browser_navigate", {"url": target_url})
-                    result = await skill_instance.execute(server, target_url, recon=recon)
-                    report.attack_results.append(result)
-                    logger.info("Skill done", skill=skill_name, success=result.success)
-                except Exception as e:
-                    logger.error("Skill failed", skill=skill_name, error=str(e))
-                    report.attack_results.append(
-                        SkillResult(
-                            skill_name=skill_name,
-                            success=False,
-                            severity=ThreatLevel.LOW,
-                            error=str(e),
-                        )
-                    )
+            # 3. Execute: ReAct (Ollama) or legacy fallback
+            if use_react:
+                await self._execute_react(server, plan, target_url, report)
+            else:
+                await self._execute_legacy(server, plan, target_url, recon, report)
 
             # 4. Score + summary
             report.calculate_score()
             report.finished_at = datetime.utcnow().isoformat()
             report.summary = _build_summary(report)
+
+            # 5. Post-attack analysis via Gemini
+            if report.attack_results:
+                analysis = await self._analyze_results(report)
+                if analysis:
+                    report.summary += f"\n\n--- Gemini Analysis ---\n{analysis}"
 
         finally:
             await server.stop()
@@ -325,7 +449,12 @@ class AttackOrchestrator:
             recon: Dynamic reconnaissance data from the target page
             static_findings: Optional static analysis results from GitHub scan
         """
-        available = get_registry().names()
+        # Use knowledge-layer skill index for planning
+        available = list_skills()
+        skill_summaries = "\n".join(
+            f"  - {s['id']}: {s['name']} [{s['severity']}] — {s['description']}"
+            for s in SKILL_INDEX
+        )
 
         # Build context from static findings if available
         static_context = ""
@@ -354,7 +483,7 @@ class AttackOrchestrator:
             f"Cookie数: {len(recon.cookies)}\n"
             f"localStorage キー: {list(recon.local_storage.keys())}\n"
             f"{static_context}\n"
-            f"利用可能なスキル: {available}\n\n"
+            f"利用可能なスキル:\n{skill_summaries}\n\n"
             f"静的分析と動的分析の両方を考慮して、攻撃計画を立ててください。\n"
             f"以下JSON形式で回答(他のテキスト不要):\n"
             f'{{"reasoning":"なぜこれらを選んだか","selected_attacks":["name",...],"priority_order":["最優先",...]}}\n'
