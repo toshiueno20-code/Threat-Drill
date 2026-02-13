@@ -1,20 +1,17 @@
-"""Attack Orchestrator — unified static (GitHub) + dynamic (URL) red-team flow.
+"""Red-team orchestration focused on safe vulnerability assessment planning.
 
-Architecture
-------------
-1. [Recon]   Navigate once → collect structured ``ReconData``.
-2. [Plan]    Feed recon into Gemini 3 Flash → ``AttackPlan`` (ordered skill list).
-3. [Execute] Run each skill in priority order, passing recon so skills skip
-             redundant page-fetches.
-4. [Report]  Aggregate ``SkillResult`` list → score → ``RedTeamReport``.
-
-All data-transfer objects are Pydantic v2 ``BaseModel`` so the router can
-serialise them with a single ``model_dump()`` call.
+Policy constraints:
+1. AI may generate a vulnerability check plan.
+2. AI must not autonomously execute security skills.
+3. Skill execution requires explicit per-request user approval in router/agent layers.
 """
+
+from __future__ import annotations
 
 import json
 import re
 import uuid
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
@@ -24,42 +21,52 @@ from shared.schemas import ThreatLevel
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
 from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
-from red_teaming.skills import get_registry, SkillResult, ReconData
+from red_teaming.skills import ReconData, SkillResult, get_registry
 
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Pydantic v2 report models
-# ---------------------------------------------------------------------------
-
-
-class AttackPlan(BaseModel):
-    """Gemini-generated attack plan."""
+class VulnerabilityCheckPlan(BaseModel):
+    """Gemini-generated read-only vulnerability check plan."""
 
     plan_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     target_url: str
     reasoning: str = ""
-    selected_attacks: list[str] = Field(default_factory=list)
+    selected_checks: list[str] = Field(default_factory=list)
     priority_order: list[str] = Field(default_factory=list)
+    safety_policy: str = (
+        "Read-only checks only. No exploit payloads, destructive actions, or unauthorized access attempts."
+    )
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
 class RedTeamReport(BaseModel):
-    """Consolidated red-team report — static + dynamic phases."""
+    """Consolidated red-team report for static and dynamic assessment phases."""
 
     report_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     target_url: str
     started_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     finished_at: str | None = None
     static_result: dict[str, Any] | None = None
-    attack_plan: AttackPlan | None = None
+
+    # New terminology
+    vulnerability_check_plan: VulnerabilityCheckPlan | None = None
+    check_results: list[SkillResult] = Field(default_factory=list)
+
+    # Backward compatibility for existing API/UI clients
+    attack_plan: VulnerabilityCheckPlan | None = None
     attack_results: list[SkillResult] = Field(default_factory=list)
+
     overall_score: float = 100.0
     summary: str = ""
 
+    def sync_legacy_fields(self) -> None:
+        """Keep legacy fields aligned for backward compatibility."""
+        self.attack_plan = self.vulnerability_check_plan
+        self.attack_results = list(self.check_results)
+
     def calculate_score(self) -> float:
-        """Deduct from 100 per confirmed vulnerability severity."""
+        """Deduct from 100 for each confirmed finding by severity."""
         deductions = {
             ThreatLevel.CRITICAL: 25,
             ThreatLevel.HIGH: 15,
@@ -67,91 +74,69 @@ class RedTeamReport(BaseModel):
             ThreatLevel.LOW: 3,
         }
         score = 100.0
-        for r in self.attack_results:
-            if r.success:
-                score -= deductions.get(r.severity, 5)
+        for result in self.check_results:
+            if result.success:
+                score -= deductions.get(result.severity, 5)
         self.overall_score = max(score, 0.0)
         return self.overall_score
 
 
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
-
-
 class AttackOrchestrator:
-    """Orchestrates the full red-team pipeline via the Skill registry."""
+    """Compatibility wrapper for red-team routes.
+
+    The class name is preserved to avoid wide refactors, but behavior is now
+    policy-safe: it creates vulnerability check plans and does not execute skills.
+    """
 
     def __init__(self, gemini_client: GeminiClient):
         self.gemini_client = gemini_client
 
-    # --- Public API ---------------------------------------------------------
-
     async def run_static_scan(self, github_url: str) -> dict[str, Any]:
-        """GitHub static security scan — delegates to existing static_analyzer."""
+        """Run GitHub static security scan via static analyzer."""
         from static_analyzer.github_integration.repo_analyzer import GitHubRepositoryAnalyzer
         from static_analyzer.vulnerability_scanner.ai_app_scanner import AIAppSecurityScanner
 
-        logger.info("Static scan", github_url=github_url)
-        analyzer = GitHubRepositoryAnalyzer(github_url, gemini_client=self.gemini_client)
-        app_config = await analyzer.analyze_repository()
-        scanner = AIAppSecurityScanner(app_config)
-        result = await scanner.scan()
-        logger.info("Static scan done", score=result.get("security_score"))
+        logger.info("Static scan requested", github_url=github_url)
+        analyzer = GitHubRepositoryAnalyzer(gemini_client=self.gemini_client)
+        app_config = await analyzer.analyze_repository(github_url)
+        scanner = AIAppSecurityScanner(self.gemini_client)
+        audit_result = await scanner.scan_repository(repo_url=github_url, config=app_config)
+        result = asdict(audit_result)
+        logger.info("Static scan completed", score=result.get("overall_score"))
         return result
 
     async def run_dynamic_attack(self, target_url: str) -> RedTeamReport:
-        """Full dynamic attack: recon → plan → skills → report."""
-        # URL verification happens in PlaywrightMCPServer during navigation
+        """Backward-compatible entry point; now returns a dynamic assessment plan only."""
+        return await self.run_dynamic_assessment(target_url)
+
+    async def run_dynamic_assessment(self, target_url: str) -> RedTeamReport:
+        """Build recon + vulnerability check plan without executing skills."""
         report = RedTeamReport(target_url=target_url)
 
         server = PlaywrightMCPServer(headless=True)
         await server.start()
 
         try:
-            # 1. Recon — single pass, data shared with every skill
-            logger.info("Recon phase", url=target_url)
+            logger.info("Dynamic recon phase started", target_url=target_url)
             recon = await self._run_recon(server, target_url)
 
-            # 2. Attack plan via Gemini
-            logger.info("Planning via Gemini")
-            plan = await self._generate_attack_plan(recon, static_findings=None)
-            report.attack_plan = plan
+            logger.info("Generating vulnerability check plan")
+            plan = await self._generate_vulnerability_check_plan(recon=recon, static_findings=None)
+            report.vulnerability_check_plan = plan
+            report.sync_legacy_fields()
 
-            # 3. Execute skills in priority order
-            registry = get_registry()
-            for skill_name in plan.priority_order:
-                skill_instance = registry.get(skill_name)
-                if skill_instance is None:
-                    logger.warning("Unknown skill in plan", skill=skill_name)
-                    continue
+            logger.info(
+                "Plan created; autonomous execution is disabled by policy",
+                planned_checks=len(plan.priority_order),
+            )
 
-                logger.info("Running skill", skill=skill_name)
-                try:
-                    await server.call_tool("browser_navigate", {"url": target_url})
-                    result = await skill_instance.execute(server, target_url, recon=recon)
-                    report.attack_results.append(result)
-                    logger.info("Skill done", skill=skill_name, success=result.success)
-                except Exception as e:
-                    logger.error("Skill failed", skill=skill_name, error=str(e))
-                    report.attack_results.append(
-                        SkillResult(
-                            skill_name=skill_name,
-                            success=False,
-                            severity=ThreatLevel.LOW,
-                            error=str(e),
-                        )
-                    )
-
-            # 4. Score + summary
             report.calculate_score()
             report.finished_at = datetime.utcnow().isoformat()
             report.summary = _build_summary(report)
-
         finally:
             await server.stop()
 
-        logger.info("Dynamic attack complete", report_id=report.report_id, score=report.overall_score)
+        logger.info("Dynamic assessment completed", report_id=report.report_id)
         return report
 
     async def run_full_red_team(
@@ -159,12 +144,7 @@ class AttackOrchestrator:
         target_url: str,
         github_url: str | None = None,
     ) -> dict[str, Any]:
-        """Combined static + dynamic in one call.
-
-        When both GitHub URL and target URL are provided, static analysis
-        results are used to inform the dynamic attack planning for more
-        effective attack scenarios.
-        """
+        """Run static scan and dynamic assessment planning in one call."""
         combined: dict[str, Any] = {
             "red_team_id": str(uuid.uuid4()),
             "started_at": datetime.utcnow().isoformat(),
@@ -174,90 +154,54 @@ class AttackOrchestrator:
 
         static_findings: dict[str, Any] | None = None
 
-        # 1. Static analysis (GitHub) - if provided
         if github_url:
             try:
-                logger.info("Running static analysis", github_url=github_url)
                 combined["static"] = await self.run_static_scan(github_url)
                 static_findings = combined["static"]
-            except Exception as e:
-                logger.error("Static scan failed", error=str(e))
-                combined["static"] = {"error": str(e)}
+            except Exception as exc:
+                logger.error("Static scan failed", error=str(exc))
+                combined["static"] = {"error": str(exc)}
 
-        # 2. Dynamic attack (informed by static findings if available)
         try:
-            report = await self._run_dynamic_attack_with_context(
-                target_url, static_findings
-            )
+            report = await self._run_dynamic_assessment_with_context(target_url, static_findings)
             combined["dynamic"] = report.model_dump()
-        except Exception as e:
-            logger.error("Dynamic attack failed", error=str(e))
-            combined["dynamic"] = {"error": str(e)}
+        except Exception as exc:
+            logger.error("Dynamic assessment failed", error=str(exc))
+            combined["dynamic"] = {"error": str(exc)}
 
         combined["finished_at"] = datetime.utcnow().isoformat()
         return combined
 
-    async def _run_dynamic_attack_with_context(
+    async def _run_dynamic_assessment_with_context(
         self,
         target_url: str,
         static_findings: dict[str, Any] | None = None,
     ) -> RedTeamReport:
-        """Dynamic attack with optional static analysis context."""
+        """Build dynamic assessment plan with optional static analysis context."""
         report = RedTeamReport(target_url=target_url)
 
         server = PlaywrightMCPServer(headless=True)
         await server.start()
 
         try:
-            # 1. Recon — single pass, data shared with every skill
-            logger.info("Recon phase", url=target_url)
+            logger.info("Dynamic recon phase started", target_url=target_url)
             recon = await self._run_recon(server, target_url)
 
-            # 2. Attack plan via Gemini (with static context if available)
-            logger.info("Planning via Gemini", has_static_context=static_findings is not None)
-            plan = await self._generate_attack_plan(recon, static_findings)
-            report.attack_plan = plan
+            logger.info("Generating vulnerability check plan", has_static_context=bool(static_findings))
+            plan = await self._generate_vulnerability_check_plan(recon, static_findings)
+            report.vulnerability_check_plan = plan
+            report.sync_legacy_fields()
 
-            # 3. Execute skills in priority order
-            registry = get_registry()
-            for skill_name in plan.priority_order:
-                skill_instance = registry.get(skill_name)
-                if skill_instance is None:
-                    logger.warning("Unknown skill in plan", skill=skill_name)
-                    continue
-
-                logger.info("Running skill", skill=skill_name)
-                try:
-                    await server.call_tool("browser_navigate", {"url": target_url})
-                    result = await skill_instance.execute(server, target_url, recon=recon)
-                    report.attack_results.append(result)
-                    logger.info("Skill done", skill=skill_name, success=result.success)
-                except Exception as e:
-                    logger.error("Skill failed", skill=skill_name, error=str(e))
-                    report.attack_results.append(
-                        SkillResult(
-                            skill_name=skill_name,
-                            success=False,
-                            severity=ThreatLevel.LOW,
-                            error=str(e),
-                        )
-                    )
-
-            # 4. Score + summary
             report.calculate_score()
             report.finished_at = datetime.utcnow().isoformat()
             report.summary = _build_summary(report)
-
         finally:
             await server.stop()
 
-        logger.info("Dynamic attack complete", report_id=report.report_id, score=report.overall_score)
         return report
 
-    # --- Internal -----------------------------------------------------------
-
     async def _run_recon(self, server: PlaywrightMCPServer, target_url: str) -> ReconData:
-        """Gather structured reconnaissance in a single page visit."""
+        """Collect structured reconnaissance data in a single page session."""
         await server.call_tool("browser_navigate", {"url": target_url})
 
         html = (await server.call_tool("browser_get_html", {})).get("result", "")
@@ -297,9 +241,7 @@ class AttackOrchestrator:
             ).get("result", "[]")
         )
 
-        cookies = json.loads(
-            (await server.call_tool("browser_get_cookies", {})).get("result", "[]")
-        )
+        cookies = json.loads((await server.call_tool("browser_get_cookies", {})).get("result", "[]"))
         local_storage = json.loads(
             (await server.call_tool("browser_get_local_storage", {})).get("result", "{}")
         )
@@ -314,92 +256,127 @@ class AttackOrchestrator:
             local_storage=local_storage,
         )
 
-    async def _generate_attack_plan(
+    async def _generate_vulnerability_check_plan(
         self,
         recon: ReconData,
         static_findings: dict[str, Any] | None = None,
-    ) -> AttackPlan:
-        """Gemini Flash picks which skills to run and in what order.
-
-        Args:
-            recon: Dynamic reconnaissance data from the target page
-            static_findings: Optional static analysis results from GitHub scan
-        """
+    ) -> VulnerabilityCheckPlan:
+        """Generate a prioritized read-only vulnerability check plan."""
         available = get_registry().names()
 
-        # Build context from static findings if available
         static_context = ""
         if static_findings:
             vulnerabilities = static_findings.get("vulnerabilities", [])
-            security_score = static_findings.get("security_score", "N/A")
+            security_score = static_findings.get("security_score", static_findings.get("overall_score", "N/A"))
             static_context = (
-                f"\n--- 静的分析結果 (GitHub) ---\n"
-                f"セキュリティスコア: {security_score}\n"
-                f"検出された脆弱性: {len(vulnerabilities)}件\n"
+                "\nStatic analysis context:\n"
+                f"- Security score: {security_score}\n"
+                f"- Reported vulnerabilities: {len(vulnerabilities)}\n"
             )
             if vulnerabilities:
-                vuln_summary = ", ".join(
-                    v.get("type", "unknown") for v in vulnerabilities[:10]
-                )
-                static_context += f"脆弱性タイプ: {vuln_summary}\n"
+                vuln_summary = ", ".join(v.get("type", "unknown") for v in vulnerabilities[:10])
+                static_context += f"- Top vulnerability types: {vuln_summary}\n"
 
         prompt = (
-            f"あなたはThreat DrillのRedTeam攻撃プランナーです。\n"
-            f"対象アプリの情報から最も効果的な攻撃の組み合わせと優先順位を決定してください。\n\n"
-            f"--- 動的分析結果 (ページ情報) ---\n"
-            f"対象URL: {recon.url}\n"
-            f"ページテキスト(冒頭500文字): {recon.text[:500]}\n"
-            f"入力フィールド数: {len(recon.inputs)}\n"
-            f"フォーム数: {len(recon.forms)}\n"
-            f"Cookie数: {len(recon.cookies)}\n"
-            f"localStorage キー: {list(recon.local_storage.keys())}\n"
+            "You are a security assessment planner.\n"
+            "Create a prioritized vulnerability check plan for a web application.\n"
+            "Policy constraints:\n"
+            "- Output read-only checks only.\n"
+            "- Do not include exploit payloads or attack instructions.\n"
+            "- Do not include destructive or unauthorized actions.\n\n"
+            "Dynamic recon summary:\n"
+            f"- Target URL: {recon.url}\n"
+            f"- Visible text (first 500 chars): {recon.text[:500]}\n"
+            f"- Input fields: {len(recon.inputs)}\n"
+            f"- Forms: {len(recon.forms)}\n"
+            f"- Cookies: {len(recon.cookies)}\n"
+            f"- Local storage keys: {list(recon.local_storage.keys())}\n"
             f"{static_context}\n"
-            f"利用可能なスキル: {available}\n\n"
-            f"静的分析と動的分析の両方を考慮して、攻撃計画を立ててください。\n"
-            f"以下JSON形式で回答(他のテキスト不要):\n"
-            f'{{"reasoning":"なぜこれらを選んだか","selected_attacks":["name",...],"priority_order":["最優先",...]}}\n'
+            f"Available read-only checks: {available}\n\n"
+            "Return JSON only:\n"
+            '{"reasoning":"why these checks","selected_checks":["name"],"priority_order":["name"]}'
         )
 
-        # TODO: 実際のVertex AI SDKを使用
-        result = await self.gemini_client.analyze_with_flash(
-            [{"type": "text", "text": prompt}]
-        )
+        response = await self.gemini_client.analyze_with_flash([{"type": "text", "text": prompt}])
 
-        # Parse — fallback to full skill list
-        reasoning = result.get("reasoning", "")
-        try:
-            m = re.search(r"\{.*\}", reasoning, re.DOTALL)
-            plan_data: dict[str, Any] = json.loads(m.group()) if m else {}
-        except Exception:
-            plan_data = {}
+        reasoning_text = str(response.get("reasoning", ""))
+        parsed = self._extract_plan_json(reasoning_text)
 
-        return AttackPlan(
+        if isinstance(response.get("selected_checks"), list):
+            parsed.setdefault("selected_checks", response.get("selected_checks"))
+        if isinstance(response.get("priority_order"), list):
+            parsed.setdefault("priority_order", response.get("priority_order"))
+
+        selected = _normalise_plan_names(parsed.get("selected_checks"), available)
+        priority = _normalise_plan_names(parsed.get("priority_order"), available)
+
+        if not selected:
+            selected = list(available)
+        if not priority:
+            priority = list(selected)
+
+        # Ensure priority includes all selected checks.
+        for name in selected:
+            if name not in priority:
+                priority.append(name)
+
+        return VulnerabilityCheckPlan(
             target_url=recon.url,
-            reasoning=plan_data.get("reasoning", reasoning or "Default: run all skills"),
-            selected_attacks=plan_data.get("selected_attacks", available),
-            priority_order=plan_data.get("priority_order", available),
+            reasoning=str(parsed.get("reasoning", "") or reasoning_text or "Default: evaluate all checks"),
+            selected_checks=selected,
+            priority_order=priority,
         )
 
+    @staticmethod
+    def _extract_plan_json(reasoning: str) -> dict[str, Any]:
+        """Extract the first JSON object from model reasoning text."""
+        if not reasoning:
+            return {}
+        try:
+            match = re.search(r"\{.*\}", reasoning, re.DOTALL)
+            if not match:
+                return {}
+            data = json.loads(match.group())
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+
+def _normalise_plan_names(values: Any, available: list[str]) -> list[str]:
+    """Filter and de-duplicate plan names while preserving order."""
+    if not isinstance(values, list):
+        return []
+
+    available_set = set(available)
+    output: list[str] = []
+    for value in values:
+        name = str(value)
+        if name in available_set and name not in output:
+            output.append(name)
+    return output
 
 
 def _build_summary(report: RedTeamReport) -> str:
-    total = len(report.attack_results)
-    confirmed = sum(1 for r in report.attack_results if r.success)
-    critical = sum(1 for r in report.attack_results if r.success and r.severity == ThreatLevel.CRITICAL)
-    high = sum(1 for r in report.attack_results if r.success and r.severity == ThreatLevel.HIGH)
+    """Build a concise report summary for logs and API output."""
+    total = len(report.check_results)
+    confirmed = sum(1 for r in report.check_results if r.success)
+    critical = sum(1 for r in report.check_results if r.success and r.severity == ThreatLevel.CRITICAL)
+    high = sum(1 for r in report.check_results if r.success and r.severity == ThreatLevel.HIGH)
 
     lines = [
-        f"Red Team Report — {report.report_id}",
-        f"Target: {report.target_url}  |  Score: {report.overall_score}/100",
-        f"Executed: {total}  |  Confirmed: {confirmed}  |  Critical: {critical}  |  High: {high}",
+        f"Vulnerability Assessment Report - {report.report_id}",
+        f"Target: {report.target_url} | Score: {report.overall_score}/100",
+        f"Executed checks: {total} | Confirmed findings: {confirmed} | Critical: {critical} | High: {high}",
         "",
     ]
-    for r in report.attack_results:
-        tag = "VULN" if r.success else "OK  "
-        lines.append(f"  [{tag}] {r.skill_name:<25} {r.severity.value:<10} {len(r.evidence)} findings")
+
+    for result in report.check_results:
+        tag = "FINDING" if result.success else "PASS"
+        lines.append(
+            f"  [{tag}] {result.skill_name:<35} {result.severity.value:<10} {len(result.evidence)} evidence item(s)"
+        )
+
+    if total == 0:
+        lines.append("No skills were executed automatically. User approval is required per execution request.")
 
     return "\n".join(lines)

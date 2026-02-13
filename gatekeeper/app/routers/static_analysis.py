@@ -68,6 +68,11 @@ async def scan_repository(
     try:
         # Geminiクライアントの初期化
         gemini_client = GeminiClient(
+            api_key=settings.api_key,
+            base_url=settings.gemini_api_base_url,
+            flash_model=settings.gemini_flash_model,
+            deep_model=settings.gemini_deep_model,
+            embedding_model=settings.gemini_embed_model,
             project_id=settings.gcp_project_id,
             location=settings.gcp_location,
         )

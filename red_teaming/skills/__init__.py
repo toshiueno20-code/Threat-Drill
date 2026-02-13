@@ -1,13 +1,7 @@
-"""Threat Drill Agent Skills — composable, auto-registered security-testing capabilities.
+"""Threat Drill skill package.
 
-Importing this package populates the global SkillRegistry with every
-concrete skill defined in the sub-modules below.
-
-Includes:
-- OWASP Web Application Top 10 (2025) attacks
-- OWASP LLM Top 10 (2025) attacks
-- Traditional web attacks (XSS, SQLi, CSRF, etc.)
-- Authentication and authorization attacks
+This package only registers read-only vulnerability check skills.
+Exploit-oriented attack skills are intentionally disabled by policy.
 """
 
 import logging
@@ -26,13 +20,9 @@ from .base import (
     record,
 )
 
-# Trigger @skill registration for all concrete skill modules
+# Trigger @skill registration for approved (read-only) skill modules.
 _skill_modules = [
-    ("web_attacks", "web_attacks"),
-    ("ai_attacks", "ai_attacks"),
-    ("auth_attacks", "auth_attacks"),
-    ("owasp_web_attacks", "owasp_web_attacks"),
-    ("owasp_llm_attacks", "owasp_llm_attacks"),
+    ("security_checks", "security_checks"),
 ]
 
 for _module_name, _display_name in _skill_modules:
