@@ -184,11 +184,19 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 22px;
             flex-shrink: 0;
             position: relative;
             overflow: hidden;
             box-shadow: 0 0 20px rgba(108,92,231,0.3);
+        }
+
+        .brand-icon::before {
+            content: '';
+            width: 26px;
+            height: 26px;
+            background: url('/static/assets/icons/brand.png') center/contain no-repeat;
+            filter: drop-shadow(0 2px 10px rgba(0,0,0,0.25));
+            opacity: 0.95;
         }
 
         .brand-icon::after {
@@ -282,7 +290,28 @@
             border-color: rgba(168,85,247,0.2);
         }
 
-        .nav-item .nav-icon { width: 20px; text-align: center; font-size: 15px; flex-shrink: 0; }
+        /* Nav icons (generated PNGs) */
+        .nav-item .nav-icon {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: 18px 18px;
+            opacity: 0.85;
+            filter: drop-shadow(0 2px 10px rgba(0,0,0,0.20));
+        }
+        .nav-item:hover .nav-icon { opacity: 1; }
+        .nav-item.active .nav-icon { opacity: 1; }
+
+        .nav-item[data-tab="dashboard"] .nav-icon { background-image: url('/static/assets/icons/nav-dashboard.png'); }
+        .nav-item[data-tab="redteam"] .nav-icon { background-image: url('/static/assets/icons/nav-redteam.png'); }
+        .nav-item[data-tab="blueteam"] .nav-icon { background-image: url('/static/assets/icons/nav-blueteam.png'); }
+        .nav-item[data-tab="purpleteam"] .nav-icon { background-image: url('/static/assets/icons/nav-purpleteam.png'); }
+        .nav-item[data-tab="api"] .nav-icon { background-image: url('/static/assets/icons/nav-api.png'); }
 
         .nav-badge {
             margin-left: auto;
@@ -506,14 +535,24 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            border: 1px solid var(--border-dim);
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: 20px 20px;
         }
-        .stat-icon.i-red    { background: var(--red-glow); }
-        .stat-icon.i-blue   { background: var(--blue-glow); }
-        .stat-icon.i-purple { background: var(--purple-glow); }
-        .stat-icon.i-green  { background: var(--success-glow); }
-        .stat-icon.i-yellow { background: var(--warning-glow); }
-        .stat-icon.i-neutral{ background: rgba(255,255,255,0.05); }
+        /* Use background-color (not the background shorthand) so we don't reset background-* icon settings. */
+        .stat-icon.i-red    { background-color: var(--red-glow); }
+        .stat-icon.i-blue   { background-color: var(--blue-glow); }
+        .stat-icon.i-purple { background-color: var(--purple-glow); }
+        .stat-icon.i-green  { background-color: var(--success-glow); }
+        .stat-icon.i-yellow { background-color: var(--warning-glow); }
+        .stat-icon.i-neutral{ background-color: rgba(255,255,255,0.05); }
+        .stat-icon[data-ico="requests"] { background-image: url('/static/assets/icons/stat-requests.png'); }
+        .stat-icon[data-ico="blocked"] { background-image: url('/static/assets/icons/stat-blocked.png'); }
+        .stat-icon[data-ico="attack-skills"] { background-image: url('/static/assets/icons/stat-attack-skills.png'); }
+        .stat-icon[data-ico="defense-skills"] { background-image: url('/static/assets/icons/stat-defense-skills.png'); }
+        .stat-icon[data-ico="detection-rate"] { background-image: url('/static/assets/icons/stat-detection-rate.png'); }
+        .stat-icon[data-ico="defense-score"] { background-image: url('/static/assets/icons/stat-defense-score.png'); }
 
         .stat-value {
             font-size: 30px;
@@ -1109,7 +1148,25 @@
             padding: 40px 20px;
             color: var(--text-500);
         }
-        .empty-state .es-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.3; }
+        .empty-state .es-icon {
+            width: 46px;
+            height: 46px;
+            margin: 0 auto 12px;
+            opacity: 0.55;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: 42px 42px;
+            filter: drop-shadow(0 2px 14px rgba(0,0,0,0.22));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: var(--text-400);
+        }
+        .empty-state .es-icon[data-ico="inbox"] { background-image: url('/static/assets/icons/empty-inbox.png'); }
+        .empty-state .es-icon[data-ico="tools"] { background-image: url('/static/assets/icons/empty-tools.png'); }
+        .empty-state .es-icon[data-ico="search"] { background-image: url('/static/assets/icons/empty-search.png'); }
+        .empty-state .es-icon[data-ico="map"] { background-image: url('/static/assets/icons/empty-map.png'); }
 
         /* ================================================================
            UTILITIES
@@ -1130,6 +1187,114 @@
         .gap-row { display: flex; gap: 8px; align-items: center; }
 
         .controls-stack { display: flex; flex-direction: column; gap: 14px; }
+
+        /* ================================================================
+           LOG DETAIL MODAL
+           ================================================================ */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 22px;
+        }
+        .modal-overlay.open { display: flex; }
+
+        .modal {
+            width: min(1100px, 96vw);
+            height: min(80vh, 760px);
+            background: var(--bg-glass-thick);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px;
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: 380px 1fr;
+        }
+        @media (max-width: 900px) { .modal { grid-template-columns: 1fr; height: min(86vh, 860px); } }
+
+        .modal-left {
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .modal-right { display: flex; flex-direction: column; min-height: 0; }
+
+        .modal-head {
+            padding: 14px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .modal-title {
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-200);
+        }
+        .modal-body { padding: 12px; overflow: auto; min-height: 0; }
+
+        .run-list { display: flex; flex-direction: column; gap: 8px; }
+        .run-item {
+            padding: 10px 10px;
+            border-radius: 12px;
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.02);
+            cursor: pointer;
+            transition: all 0.2s var(--ease-out-expo);
+        }
+        .run-item:hover { border-color: var(--border-subtle); transform: translateY(-1px); }
+        .run-item.active { border-color: rgba(30,144,255,0.35); box-shadow: 0 0 0 3px rgba(30,144,255,0.10); }
+        .run-top { display:flex; align-items:center; justify-content: space-between; gap: 10px; }
+        .run-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--border-dim);
+            color: var(--text-200);
+            white-space: nowrap;
+        }
+        .run-badge.red { border-color: rgba(255,71,87,0.28); background: rgba(255,71,87,0.08); color: var(--red-bright); }
+        .run-badge.blue { border-color: rgba(30,144,255,0.28); background: rgba(30,144,255,0.08); color: var(--blue-bright); }
+        .run-badge.purple { border-color: rgba(168,85,247,0.28); background: rgba(168,85,247,0.08); color: var(--purple-bright); }
+
+        .kv { display:grid; grid-template-columns: 140px 1fr; gap: 8px 10px; }
+        .kv .k { color: var(--text-400); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; }
+        .kv .v { color: var(--text-200); font-size: 12px; overflow-wrap: anywhere; }
+
+        .section {
+            border: 1px solid var(--border-dim);
+            border-radius: 14px;
+            padding: 12px 12px;
+            background: rgba(255,255,255,0.02);
+            margin-bottom: 10px;
+        }
+        .section h3 {
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-300);
+            margin-bottom: 8px;
+        }
+        pre.json {
+            background: rgba(0,0,0,0.35);
+            border: 1px solid var(--border-dim);
+            border-radius: 12px;
+            padding: 10px;
+            overflow: auto;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-200);
+        }
 
         footer {
             text-align: center;
@@ -1174,7 +1339,7 @@
         <!-- ============================================================ -->
         <nav class="sidebar">
             <div class="sidebar-brand">
-                <div class="brand-icon">&#x1f6e1;&#xfe0f;</div>
+                <div class="brand-icon" aria-hidden="true"></div>
                 <div class="brand-text">
                     <h1>ThreatDrill</h1>
                     <div class="tagline">Security Mesh</div>
@@ -1184,26 +1349,26 @@
             <div class="sidebar-nav">
                 <div class="nav-label">Overview</div>
                 <button class="nav-item active" data-tab="dashboard">
-                    <span class="nav-icon">&#x1f4ca;</span> Dashboard
+                    <span class="nav-icon" aria-hidden="true"></span> Dashboard
                 </button>
 
                 <div class="nav-label">Operations</div>
                 <button class="nav-item t-red" data-tab="redteam">
-                    <span class="nav-icon">&#x2694;&#xfe0f;</span> Red Team
+                    <span class="nav-icon" aria-hidden="true"></span> Red Team
                     <span class="nav-badge b-red" id="redSkillCount">--</span>
                 </button>
                 <button class="nav-item t-blue" data-tab="blueteam">
-                    <span class="nav-icon">&#x1f6e1;&#xfe0f;</span> Blue Team
+                    <span class="nav-icon" aria-hidden="true"></span> Blue Team
                     <span class="nav-badge b-blue" id="blueSkillCount">--</span>
                 </button>
                 <button class="nav-item t-purple" data-tab="purpleteam">
-                    <span class="nav-icon">&#x1f91d;</span> Purple Team
+                    <span class="nav-icon" aria-hidden="true"></span> Purple Team
                     <span class="nav-badge b-purple">LIVE</span>
                 </button>
 
                 <div class="nav-label">System</div>
                 <button class="nav-item" data-tab="api">
-                    <span class="nav-icon">&#x1f50c;</span> API Reference
+                    <span class="nav-icon" aria-hidden="true"></span> API Reference
                 </button>
             </div>
 
@@ -1227,6 +1392,7 @@
                 <div class="topbar-actions">
                     <button class="btn btn-ghost btn-sm" onclick="window.open('/docs','_blank')">API Docs</button>
                     <button class="btn btn-ghost btn-sm" onclick="window.open('/metrics','_blank')">Metrics</button>
+                    <button class="btn btn-ghost btn-sm" onclick="openAssessmentLogs()">Logs</button>
                 </div>
             </div>
 
@@ -1239,7 +1405,7 @@
                         <div class="stat-card">
                             <div class="stat-top">
                                 <span class="stat-label">Total Requests</span>
-                                <div class="stat-icon i-neutral">&#x1f4c8;</div>
+                                <div class="stat-icon i-neutral" data-ico="requests" aria-hidden="true"></div>
                             </div>
                             <div class="stat-value" id="totalRequests">--</div>
                             <div class="stat-sub">All security events</div>
@@ -1247,7 +1413,7 @@
                         <div class="stat-card glow-red">
                             <div class="stat-top">
                                 <span class="stat-label">Threats Blocked</span>
-                                <div class="stat-icon i-red">&#x1f6ab;</div>
+                                <div class="stat-icon i-red" data-ico="blocked" aria-hidden="true"></div>
                             </div>
                             <div class="stat-value v-red" id="threatsBlocked">--</div>
                             <div class="stat-sub">By Blue Team defenses</div>
@@ -1255,7 +1421,7 @@
                         <div class="stat-card glow-red">
                             <div class="stat-top">
                                 <span class="stat-label">Attack Skills</span>
-                                <div class="stat-icon i-red">&#x2694;&#xfe0f;</div>
+                                <div class="stat-icon i-red" data-ico="attack-skills" aria-hidden="true"></div>
                             </div>
                             <div class="stat-value v-red" id="activeAttackSkills">--</div>
                             <div class="stat-sub">Red Team arsenal</div>
@@ -1263,7 +1429,7 @@
                         <div class="stat-card glow-blue">
                             <div class="stat-top">
                                 <span class="stat-label">Defense Skills</span>
-                                <div class="stat-icon i-blue">&#x1f6e1;&#xfe0f;</div>
+                                <div class="stat-icon i-blue" data-ico="defense-skills" aria-hidden="true"></div>
                             </div>
                             <div class="stat-value v-blue" id="activeDefenseSkills">--</div>
                             <div class="stat-sub">Blue Team defenses</div>
@@ -1271,7 +1437,7 @@
                         <div class="stat-card glow-green">
                             <div class="stat-top">
                                 <span class="stat-label">Detection Rate</span>
-                                <div class="stat-icon i-green">&#x2705;</div>
+                                <div class="stat-icon i-green" data-ico="detection-rate" aria-hidden="true"></div>
                             </div>
                             <div class="stat-value v-green" id="detectionRate">--</div>
                             <div class="stat-sub">Purple Team coverage</div>
@@ -1279,7 +1445,7 @@
                         <div class="stat-card glow-purple">
                             <div class="stat-top">
                                 <span class="stat-label">Defense Score</span>
-                                <div class="stat-icon i-purple">&#x1f3af;</div>
+                                <div class="stat-icon i-purple" data-ico="defense-score" aria-hidden="true"></div>
                             </div>
                             <div class="stat-value v-purple" id="defenseScore">--</div>
                             <div class="stat-sub">Overall posture</div>
@@ -1297,7 +1463,7 @@
                                     <thead><tr><th>Time</th><th>Type</th><th>Threat</th><th>Source</th></tr></thead>
                                     <tbody id="eventsBody">
                                         <tr><td colspan="4" class="empty-state">
-                                            <div class="es-icon">&#x1f4ed;</div>
+                                            <div class="es-icon" data-ico="inbox"></div>
                                             <div>No security events yet</div>
                                         </td></tr>
                                     </tbody>
@@ -1311,10 +1477,11 @@
                             </div>
                             <div class="card-inner">
                                 <div style="display:flex;flex-direction:column;gap:10px;">
-                                    <button class="btn btn-red" onclick="switchTab('redteam')">&#x2694;&#xfe0f; Launch Red Team Assessment</button>
-                                    <button class="btn btn-blue" onclick="switchTab('blueteam')">&#x1f6e1;&#xfe0f; Run Blue Team Scan</button>
-                                    <button class="btn btn-purple" onclick="switchTab('purpleteam')">&#x1f91d; Start Purple Team Exercise</button>
-                                    <button class="btn btn-outline" onclick="window.open('/docs','_blank')">&#x1f4d6; API Documentation</button>
+                                    <button class="btn btn-red" onclick="switchTab('redteam')">Launch Red Team Assessment</button>
+                                    <button class="btn btn-blue" onclick="switchTab('blueteam')">Run Blue Team Scan</button>
+                                    <button class="btn btn-purple" onclick="switchTab('purpleteam')">Start Purple Team Exercise</button>
+                                    <button class="btn btn-outline" onclick="openAssessmentLogs()">View Assessment Logs</button>
+                                    <button class="btn btn-outline" onclick="window.open('/docs','_blank')">API Documentation</button>
                                 </div>
 
                                 <!-- Mini MITRE Coverage Chart -->
@@ -1352,12 +1519,12 @@
                             </div>
                             <div class="card-inner">
                                 <div class="controls-stack">
-                                    <div class="field">
+                                    <div class="field" id="targetUrlField">
                                         <label>Target URL</label>
                                         <input type="text" id="targetUrl" placeholder="http://localhost:3000" value="http://localhost:8080">
                                     </div>
-                                    <div class="field">
-                                        <label>GitHub URL (optional)</label>
+                                    <div class="field" id="githubUrlField">
+                                        <label id="githubUrlLabel">GitHub URL (optional)</label>
                                         <input type="text" id="githubUrl" placeholder="https://github.com/user/repo">
                                     </div>
                                     <div class="field">
@@ -1393,7 +1560,7 @@
                                         </div>
                                     </div>
                                     <div class="action-row">
-                                        <button class="btn btn-red" id="runAttackBtn" onclick="runAttack()">&#x26a1; Run Check</button>
+                                        <button class="btn btn-red" id="runAttackBtn" onclick="runAttack()">Run</button>
                                         <button class="btn btn-outline" onclick="clearTerminal('red')">Clear</button>
                                     </div>
                                 </div>
@@ -1452,7 +1619,7 @@
                                         </div>
                                     </div>
                                     <div class="action-row">
-                                        <button class="btn btn-blue" id="runDefenseBtn" onclick="runDefense()">&#x1f6e1;&#xfe0f; Run Defense</button>
+                                        <button class="btn btn-blue" id="runDefenseBtn" onclick="runDefense()">Run</button>
                                         <button class="btn btn-outline" onclick="clearTerminal('blue')">Clear</button>
                                     </div>
                                 </div>
@@ -1557,7 +1724,7 @@
                                         </label>
                                     </div>
                                     <div class="action-row">
-                                        <button class="btn btn-purple" id="runExerciseBtn" onclick="runPurpleExercise()">&#x26a1; Start Exercise</button>
+                                        <button class="btn btn-purple" id="runExerciseBtn" onclick="runPurpleExercise()">Start Exercise</button>
                                         <button class="btn btn-outline" onclick="clearTerminal('purple')">Clear</button>
                                     </div>
                                 </div>
@@ -1594,7 +1761,7 @@
                                 <div class="card-inner">
                                     <div class="mitre-grid" id="mitreHeatmap">
                                         <div class="empty-state" style="grid-column:1/-1;">
-                                            <div class="es-icon">&#x1f5fa;&#xfe0f;</div>
+                                            <div class="es-icon" data-ico="map"></div>
                                             <div>Run an exercise to see coverage</div>
                                         </div>
                                     </div>
@@ -1702,6 +1869,41 @@
     </div>
 
     <!-- ================================================================
+         LOG DETAIL MODAL
+         ================================================================ -->
+    <div class="modal-overlay" id="logModalOverlay" onclick="if(event.target.id==='logModalOverlay') closeAssessmentLogs()">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Assessment logs">
+            <div class="modal-left">
+                <div class="modal-head">
+                    <div class="modal-title">Assessment Logs</div>
+                    <div class="gap-row">
+                        <button class="btn btn-ghost btn-sm" onclick="clearAssessmentLogs()">Clear</button>
+                        <button class="btn btn-ghost btn-sm" onclick="closeAssessmentLogs()">Close</button>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div class="run-list" id="runList"></div>
+                </div>
+            </div>
+            <div class="modal-right">
+                <div class="modal-head">
+                    <div class="modal-title">Log Details</div>
+                    <div class="gap-row">
+                        <button class="btn btn-ghost btn-sm" onclick="copyActiveRunJson()">Copy JSON</button>
+                        <button class="btn btn-ghost btn-sm" onclick="closeAssessmentLogs()">Close</button>
+                    </div>
+                </div>
+                <div class="modal-body" id="runDetail">
+                    <div class="empty-state">
+                        <div class="es-icon" data-ico="search"></div>
+                        <div>Select a log entry</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================
          JAVASCRIPT — Application Logic
          ================================================================ -->
     <script>
@@ -1719,6 +1921,12 @@
     const RING_CIRCUM = 326.73; // 2 * PI * 52
     let securityEvents = [];
     let stats = { totalRequests: 0, threatsBlocked: 0 };
+
+    // Assessment run history (stored locally for log detail view)
+    const RUNS_STORAGE_KEY = 'threatdrill_assessment_runs_v1';
+    const RUNS_MAX = 30;
+    let assessmentRuns = [];
+    let activeRunId = null;
 
     // ==================================================================
     // Navigation
@@ -1763,6 +1971,281 @@
         const t = setTimeout(() => c.abort(), ms);
         try { return await fetch(url, { ...opts, signal: c.signal }); }
         finally { clearTimeout(t); }
+    }
+
+    function _uuid() {
+        try { return crypto.randomUUID(); } catch { return `run_${Date.now()}_${Math.random().toString(16).slice(2)}`; }
+    }
+
+    function _loadRuns() {
+        try {
+            const raw = localStorage.getItem(RUNS_STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            assessmentRuns = Array.isArray(parsed) ? parsed : [];
+        } catch {
+            assessmentRuns = [];
+        }
+    }
+
+    function _saveRuns() {
+        try { localStorage.setItem(RUNS_STORAGE_KEY, JSON.stringify(assessmentRuns.slice(0, RUNS_MAX))); } catch {}
+    }
+
+    function addAssessmentRun(run) {
+        const item = {
+            id: _uuid(),
+            ts: new Date().toISOString(),
+            ...run,
+        };
+        assessmentRuns = [item, ...assessmentRuns].slice(0, RUNS_MAX);
+        _saveRuns();
+        return item;
+    }
+
+    function formatTs(ts) {
+        try { return new Date(ts).toLocaleString(); } catch { return String(ts || ''); }
+    }
+
+    function openAssessmentLogs(runId = null) {
+        const overlay = document.getElementById('logModalOverlay');
+        if (!overlay) return;
+        _loadRuns();
+        overlay.classList.add('open');
+        document.body.style.overflow = 'hidden';
+        activeRunId = runId || (assessmentRuns[0] ? assessmentRuns[0].id : null);
+        renderRunList();
+        renderActiveRun();
+    }
+
+    function closeAssessmentLogs() {
+        const overlay = document.getElementById('logModalOverlay');
+        if (!overlay) return;
+        overlay.classList.remove('open');
+        document.body.style.overflow = '';
+    }
+
+    function clearAssessmentLogs() {
+        assessmentRuns = [];
+        _saveRuns();
+        activeRunId = null;
+        renderRunList();
+        renderActiveRun();
+    }
+
+    function renderRunList() {
+        const list = document.getElementById('runList');
+        if (!list) return;
+        if (!assessmentRuns.length) {
+            list.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="inbox"></div><div>No assessment logs yet</div></div>';
+            return;
+        }
+        list.innerHTML = assessmentRuns.map(r => {
+            const team = r.team || 'red';
+            const badge = team === 'blue' ? 'blue' : team === 'purple' ? 'purple' : 'red';
+            const active = r.id === activeRunId ? 'active' : '';
+            const subj = r.target_url || r.github_url || '--';
+            return `
+                <div class="run-item ${active}" onclick="selectRun('${r.id}')">
+                    <div class="run-top">
+                        <span class="run-badge ${badge}">${esc((r.team || 'red').toUpperCase())}</span>
+                        <span class="text-xs text-muted font-mono">${esc(formatTs(r.ts))}</span>
+                    </div>
+                    <div class="mt-2 text-sm" style="color:var(--text-200);font-weight:700;">${esc(r.mode || r.kind || 'run')}</div>
+                    <div class="text-xs text-muted font-mono mt-2">${esc(String(subj).slice(0, 90))}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function selectRun(id) {
+        activeRunId = id;
+        renderRunList();
+        renderActiveRun();
+    }
+
+    function _prettyJson(obj) {
+        try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
+    }
+
+    function _renderKvRows(rows) {
+        return rows.filter(r => r && r[0]).map(([k, v]) => `
+            <div class="k">${esc(k)}</div><div class="v">${esc(v == null ? 'n/a' : String(v))}</div>
+        `).join('');
+    }
+
+    function renderActiveRun() {
+        const host = document.getElementById('runDetail');
+        if (!host) return;
+        const run = assessmentRuns.find(r => r.id === activeRunId) || null;
+        if (!run) {
+            host.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="search"></div><div>Select a log entry</div></div>';
+            return;
+        }
+
+        const payload = run.payload || {};
+        const dynamicPayload = (payload && typeof payload === 'object' && payload.dynamic && typeof payload.dynamic === 'object')
+            ? payload.dynamic
+            : payload;
+        const staticPayload = (payload && typeof payload === 'object' && payload.static && typeof payload.static === 'object')
+            ? payload.static
+            : payload;
+
+        const meta = (dynamicPayload && dynamicPayload.assessment_metadata) ? dynamicPayload.assessment_metadata : {};
+        const ai = meta.ai || {};
+        const recon = meta.recon || {};
+        const plan = (dynamicPayload && (dynamicPayload.vulnerability_check_plan || dynamicPayload.attack_plan)) || null;
+        const checkResults = (dynamicPayload && (dynamicPayload.check_results || dynamicPayload.attack_results)) || [];
+        const vulns = (staticPayload && staticPayload.vulnerabilities) ? staticPayload.vulnerabilities : [];
+
+        const aiCalls = Array.isArray(ai.mcp_function_calls) ? ai.mcp_function_calls : [];
+        const reconCalls = Array.isArray(recon.tool_calls) ? recon.tool_calls : [];
+
+        const sections = [];
+
+        sections.push(`
+            <div class="section">
+                <h3>Run</h3>
+                <div class="kv">
+                    ${_renderKvRows([
+                        ['team', run.team],
+                        ['mode', run.mode || run.kind],
+                        ['time', formatTs(run.ts)],
+                        ['target_url', run.target_url],
+                        ['github_url', run.github_url],
+                        ['endpoint', run.endpoint],
+                    ])}
+                </div>
+            </div>
+        `);
+
+        if (Object.keys(ai).length) {
+            const names = [...new Set(aiCalls.map(c => c && c.name).filter(Boolean))];
+            sections.push(`
+                <div class="section">
+                    <h3>AI</h3>
+                    <div class="kv">
+                        ${_renderKvRows([
+                            ['enabled', ai.enabled],
+                            ['engine', ai.engine],
+                            ['model', ai.model_version],
+                            ['fallback', ai.provider_fallback],
+                            ['duration_ms', ai.analysis_duration_ms],
+                            ['tokens_used', ai.tokens_used],
+                            ['mcp_used', ai.mcp_used],
+                            ['mcp_calls', ai.mcp_function_calls_count],
+                            ['mcp_call_names', names.length ? names.join(', ') : ''],
+                            ['mcp_tools_available', ai.mcp_available_tools_count],
+                            ['mcp_max_remote_calls', ai.mcp_max_remote_calls],
+                        ])}
+                    </div>
+                </div>
+            `);
+        }
+
+        if (Object.keys(recon).length) {
+            const rnames = [...new Set(reconCalls.map(c => c && c.tool).filter(Boolean))];
+            sections.push(`
+                <div class="section">
+                    <h3>Recon</h3>
+                    <div class="kv">
+                        ${_renderKvRows([
+                            ['method', recon.method],
+                            ['approved', recon.approved],
+                            ['tool_calls', recon.tool_calls_count],
+                            ['tools', rnames.length ? rnames.join(', ') : ''],
+                            ['fallback_reason', recon.fallback_reason],
+                        ])}
+                    </div>
+                </div>
+            `);
+        }
+
+        if (plan) {
+            sections.push(`
+                <div class="section">
+                    <h3>Plan</h3>
+                    <div class="kv">
+                        ${_renderKvRows([
+                            ['planned_checks', (plan.priority_order || []).length],
+                            ['selected_checks', Array.isArray(plan.selected_checks) ? plan.selected_checks.join(', ') : ''],
+                        ])}
+                    </div>
+                    ${plan.reasoning ? `<div class="mt-3 text-sm" style="color:var(--text-200);line-height:1.6;">${esc(String(plan.reasoning))}</div>` : ''}
+                </div>
+            `);
+        }
+
+        if (Array.isArray(vulns) && vulns.length) {
+            const items = vulns.slice(0, 30).map(v => {
+                const title = v.title || v.type || 'finding';
+                const sev = v.severity || 'unknown';
+                const files = Array.isArray(v.affected_files) ? v.affected_files.join(', ') : '';
+                const code = v.code_snippet ? `<pre class="json" style="margin-top:8px;">${esc(String(v.code_snippet).slice(0, 4000))}</pre>` : '';
+                return `
+                    <div style="padding:10px;border:1px solid var(--border-dim);border-radius:12px;background:rgba(255,255,255,0.01);margin-top:8px;">
+                        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+                            <div style="font-weight:800;color:var(--text-100);">${esc(title)}</div>
+                            <div class="run-badge ${sev === 'critical' || sev === 'high' ? 'red' : 'blue'}">${esc(sev)}</div>
+                        </div>
+                        <div class="text-xs text-muted mt-2">${esc(files)}</div>
+                        <div class="text-sm mt-2" style="color:var(--text-200);line-height:1.6;">${esc(v.description || '')}</div>
+                        ${v.remediation ? `<div class="text-sm mt-2" style="color:var(--text-300);line-height:1.6;"><b>Remediation:</b> ${esc(v.remediation)}</div>` : ''}
+                        ${code}
+                    </div>
+                `;
+            }).join('');
+            sections.push(`
+                <div class="section">
+                    <h3>Static Findings</h3>
+                    <div class="text-xs text-muted">Showing up to 30 findings</div>
+                    ${items}
+                </div>
+            `);
+        }
+
+        if (Array.isArray(checkResults) && checkResults.length) {
+            const items = checkResults.slice(0, 30).map(r => {
+                const sev = r.severity || 'unknown';
+                const evidence = Array.isArray(r.evidence) ? r.evidence : [];
+                const timeline = Array.isArray(r.timeline) ? r.timeline : [];
+                return `
+                    <div style="padding:10px;border:1px solid var(--border-dim);border-radius:12px;background:rgba(255,255,255,0.01);margin-top:8px;">
+                        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+                            <div style="font-weight:800;color:var(--text-100);">${esc(r.skill_name || 'skill')}</div>
+                            <div class="run-badge ${r.success ? 'red' : 'blue'}">${esc(r.success ? 'FINDING' : 'PASS')}</div>
+                        </div>
+                        <div class="text-xs text-muted mt-2">severity=${esc(sev)} duration_ms=${esc(r.duration_ms ?? 'n/a')} error=${esc(r.error || '')}</div>
+                        ${evidence.length ? `<pre class="json" style="margin-top:8px;">${esc(evidence.join('\\n'))}</pre>` : ''}
+                        ${timeline.length ? `<pre class="json" style="margin-top:8px;">${esc(_prettyJson(timeline).slice(0, 6000))}</pre>` : ''}
+                    </div>
+                `;
+            }).join('');
+            sections.push(`
+                <div class="section">
+                    <h3>Dynamic Check Results</h3>
+                    <div class="text-xs text-muted">Showing up to 30 checks</div>
+                    ${items}
+                </div>
+            `);
+        }
+
+        sections.push(`
+            <div class="section">
+                <h3>Raw JSON</h3>
+                <div class="gap-row" style="justify-content:flex-end;margin-bottom:8px;">
+                    <button class="btn btn-ghost btn-sm" onclick="copyActiveRunJson()">Copy JSON</button>
+                </div>
+                <pre class="json">${esc(_prettyJson(payload).slice(0, 200000))}</pre>
+            </div>
+        `);
+
+        host.innerHTML = sections.join('');
+    }
+
+    async function copyActiveRunJson() {
+        const run = assessmentRuns.find(r => r.id === activeRunId) || null;
+        if (!run) return;
+        try { await navigator.clipboard.writeText(_prettyJson(run.payload || {})); } catch {}
     }
 
     // ==================================================================
@@ -1890,7 +2373,7 @@
                 const d = await r.json();
                 securityEvents = Array.isArray(d) ? d : (d.events || []);
                 if (securityEvents.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon">&#x1f4ed;</div><div>No security events yet</div></td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon" data-ico="inbox"></div><div>No security events yet</div></td></tr>';
                     return;
                 }
                 stats.totalRequests = securityEvents.length;
@@ -1907,7 +2390,7 @@
                 document.getElementById('threatsBlocked').textContent = stats.threatsBlocked;
             }
         } catch {
-            tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon">&#x1f4ed;</div><div>No security events yet</div></td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon" data-ico="inbox"></div><div>No security events yet</div></td></tr>';
         }
     }
 
@@ -1929,7 +2412,7 @@
             availableSkills = d.scenarios || [];
             _redSkillsLoaded = true;
             if (availableSkills.length === 0) {
-                grid.innerHTML = '<div class="empty-state"><div class="es-icon">&#x1f527;</div><div>No security check skills registered</div></div>';
+                grid.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="tools"></div><div>No security check skills registered</div></div>';
                 return;
             }
             _renderRedSkills();
@@ -1961,9 +2444,58 @@
     }
 
     document.getElementById('attackMode').addEventListener('change', function() {
-        document.getElementById('skillSelector').style.display = this.value === 'scenario' ? 'block' : 'none';
-        if (this.value === 'scenario') loadSkills();
+        updateRedControlsForMode(this.value);
     });
+
+    function updateRedControlsForMode(mode) {
+        const targetField = document.getElementById('targetUrlField');
+        const githubField = document.getElementById('githubUrlField');
+        const githubLabel = document.getElementById('githubUrlLabel');
+        const browserControls = document.getElementById('browserControls');
+        const skillSelector = document.getElementById('skillSelector');
+
+        // Default visibility
+        if (targetField) targetField.style.display = 'block';
+        if (githubField) githubField.style.display = 'block';
+        if (browserControls) browserControls.style.display = 'none';
+        if (skillSelector) skillSelector.style.display = 'none';
+        if (githubLabel) githubLabel.textContent = 'GitHub URL (optional)';
+
+        if (mode === 'static') {
+            // Static scan: GitHub only.
+            if (targetField) targetField.style.display = 'none';
+            if (browserControls) browserControls.style.display = 'none';
+            if (skillSelector) skillSelector.style.display = 'none';
+            if (githubLabel) githubLabel.textContent = 'GitHub URL';
+            return;
+        }
+
+        if (mode === 'full') {
+            if (browserControls) browserControls.style.display = 'block';
+            // Show both fields; GitHub optional.
+            if (skillSelector) skillSelector.style.display = 'none';
+            return;
+        }
+
+        // Non-static modes
+        if (githubField) githubField.style.display = 'none';
+
+        if (mode === 'dynamic') {
+            if (browserControls) browserControls.style.display = 'block';
+            return;
+        }
+
+        if (mode === 'scenario') {
+            if (skillSelector) skillSelector.style.display = 'block';
+            loadSkills();
+            return;
+        }
+
+        if (mode === 'dynamic_checks') {
+            // Execute planned read-only checks; no selector needed.
+            return;
+        }
+    }
 
     // ==================================================================
     // Blue Team Skills
@@ -1983,7 +2515,7 @@
             availableDefenseSkills = d.scenarios || [];
             _blueSkillsLoaded = true;
             if (availableDefenseSkills.length === 0) {
-                grid.innerHTML = '<div class="empty-state"><div class="es-icon">&#x1f527;</div><div>No defense skills registered</div></div>';
+                grid.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="tools"></div><div>No defense skills registered</div></div>';
                 return;
             }
             _renderBlueSkills();
@@ -2206,6 +2738,19 @@
             // Keep a small amount of state so users can run planned checks next.
             try { if (payload && typeof payload === 'object') window.lastRedReport = payload; } catch {}
             displayResult('red', payload);
+
+            // Persist a run entry for the log detail view.
+            try {
+                addAssessmentRun({
+                    team: 'red',
+                    mode,
+                    endpoint,
+                    target_url: targetUrl || null,
+                    github_url: githubUrl || null,
+                    payload,
+                });
+            } catch {}
+
             setTimeout(fetchEvents, 1000);
 
             // UX: after plan-only mode, ask whether to continue with approved dynamic checks execution.
@@ -2229,7 +2774,7 @@
         } finally {
             isRunning = false;
             btn.disabled = false;
-            btn.innerHTML = '&#x26a1; Run Check';
+            btn.innerHTML = 'Run';
         }
     }
 
@@ -2275,13 +2820,23 @@
             const data = await r.json();
             if (!r.ok) throw new Error(data.detail || 'Defense scan failed');
             tlog('blue', 'ok', 'Defense scan completed');
-            displayDefenseResult(data.result || data.report || data);
+            const payloadOut = data.result || data.report || data;
+            displayDefenseResult(payloadOut);
+            try {
+                addAssessmentRun({
+                    team: 'blue',
+                    mode,
+                    endpoint,
+                    payload: payloadOut,
+                });
+            } catch {}
+            setTimeout(fetchEvents, 1000);
         } catch (e) {
             tlog('blue', 'err', `Error: ${e.message}`);
         } finally {
             isDefenseRunning = false;
             btn.disabled = false;
-            btn.innerHTML = '&#x1f6e1;&#xfe0f; Run Defense';
+            btn.innerHTML = 'Run';
         }
     }
 
@@ -2361,12 +2916,23 @@
 
             // Refresh MITRE heatmap after exercise
             setTimeout(fetchMitreCoverage, 500);
+
+            // Persist for log detail view.
+            try {
+                addAssessmentRun({
+                    team: 'purple',
+                    mode: 'exercise',
+                    endpoint: '/api/v1/purple-team/exercise',
+                    target_url: targetUrl || null,
+                    payload: result,
+                });
+            } catch {}
         } catch (e) {
             tlog('purple', 'err', `Error: ${e.message}`);
         } finally {
             isPurpleRunning = false;
             btn.disabled = false;
-            btn.innerHTML = '&#x26a1; Start Exercise';
+            btn.innerHTML = 'Start Exercise';
         }
     }
 
@@ -2727,6 +3293,8 @@
     fetchMitreCoverage();
     attachUrlValidator('targetUrl');
     attachUrlValidator('purpleTargetUrl');
+    // Ensure correct visibility on first render.
+    try { updateRedControlsForMode(document.getElementById('attackMode').value); } catch {}
     setInterval(checkHealth, 30000);
     </script>
 </body>
