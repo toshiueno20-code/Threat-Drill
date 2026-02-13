@@ -91,6 +91,30 @@ def _require_execution_approval(approval: "ExecutionApprovalRequest") -> Executi
     )
 
 
+def _require_browser_automation_approval(
+    approval: "ExecutionApprovalRequest",
+    *,
+    purpose: str,
+) -> ExecutionApproval:
+    """Validate approval payload for browser automation (Playwright/MCP) per request."""
+    if not approval.approved:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Browser automation is blocked: explicit user approval is required for each request "
+                f"(purpose={purpose})."
+            ),
+        )
+    if not approval.approved_by.strip():
+        raise HTTPException(status_code=400, detail="approved_by is required when approved=true.")
+
+    return ExecutionApproval(
+        approved=True,
+        approved_by=approval.approved_by.strip(),
+        approval_note=approval.approval_note.strip() if approval.approval_note else "",
+    )
+
+
 class ExecutionApprovalRequest(BaseModel):
     approved: bool = Field(
         default=False,
@@ -112,11 +136,28 @@ class StaticScanRequest(BaseModel):
 
 class DynamicAttackRequest(BaseModel):
     target_url: str = Field(..., description="Target URL (allowlist validated)")
+    # Browser automation is optional and requires explicit per-request human approval.
+    browser_automation_approval: ExecutionApprovalRequest | None = Field(
+        default=None,
+        description="Approval payload required to enable Playwright-based browser reconnaissance.",
+    )
+    mcp_tools_approval: ExecutionApprovalRequest | None = Field(
+        default=None,
+        description="Approval payload required to allow Gemini to use MCP tools (Playwright MCP).",
+    )
 
 
 class FullRedTeamRequest(BaseModel):
     target_url: str = Field(..., description="Target URL (allowlist validated)")
     github_url: str | None = Field(None, description="Optional GitHub URL for static scan")
+    browser_automation_approval: ExecutionApprovalRequest | None = Field(
+        default=None,
+        description="Approval payload required to enable Playwright-based browser reconnaissance.",
+    )
+    mcp_tools_approval: ExecutionApprovalRequest | None = Field(
+        default=None,
+        description="Approval payload required to allow Gemini to use MCP tools (Playwright MCP).",
+    )
 
 
 class SingleSkillRequest(BaseModel):
@@ -125,6 +166,23 @@ class SingleSkillRequest(BaseModel):
     execution_approval: ExecutionApprovalRequest = Field(
         ...,
         description="Explicit per-request human approval payload",
+    )
+
+
+class DynamicChecksExecutionRequest(BaseModel):
+    target_url: str = Field(..., description="Target URL (allowlist validated)")
+    selected_checks: list[str] | None = Field(
+        default=None,
+        description="Optional list of read-only checks to execute. Defaults to all registered checks.",
+    )
+    # Skill execution and browser automation both require explicit per-request approval.
+    execution_approval: ExecutionApprovalRequest = Field(
+        ...,
+        description="Explicit per-request human approval payload for executing checks.",
+    )
+    browser_automation_approval: ExecutionApprovalRequest = Field(
+        ...,
+        description="Approval payload required to enable Playwright browser automation for executing checks.",
     )
 
 
@@ -152,7 +210,32 @@ async def dynamic_attack(request: DynamicAttackRequest) -> dict:
     logger.info("Dynamic assessment requested", target_url=request.target_url)
     orchestrator = AttackOrchestrator(_build_gemini_client())
     try:
-        report = await orchestrator.run_dynamic_assessment(request.target_url)
+        allow_browser_automation = False
+        allow_mcp_tools = False
+        approved_by: str | None = None
+
+        if request.browser_automation_approval is not None:
+            approval = _require_browser_automation_approval(
+                request.browser_automation_approval,
+                purpose="playwright_recon",
+            )
+            allow_browser_automation = True
+            approved_by = approval.approved_by
+
+        if request.mcp_tools_approval is not None:
+            approval = _require_browser_automation_approval(
+                request.mcp_tools_approval,
+                purpose="mcp_tool_use",
+            )
+            allow_mcp_tools = True
+            approved_by = approved_by or approval.approved_by
+
+        report = await orchestrator.run_dynamic_assessment(
+            request.target_url,
+            allow_browser_automation=allow_browser_automation,
+            allow_mcp_tools=allow_mcp_tools,
+            approved_by=approved_by or "",
+        )
         return {"status": "completed", "report": report.model_dump()}
     except SandboxVerificationError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
@@ -172,9 +255,32 @@ async def full_red_team(request: FullRedTeamRequest) -> dict:
     logger.info("Full assessment requested", target=request.target_url, github=request.github_url)
     orchestrator = AttackOrchestrator(_build_gemini_client())
     try:
+        allow_browser_automation = False
+        allow_mcp_tools = False
+        approved_by: str | None = None
+
+        if request.browser_automation_approval is not None:
+            approval = _require_browser_automation_approval(
+                request.browser_automation_approval,
+                purpose="playwright_recon",
+            )
+            allow_browser_automation = True
+            approved_by = approval.approved_by
+
+        if request.mcp_tools_approval is not None:
+            approval = _require_browser_automation_approval(
+                request.mcp_tools_approval,
+                purpose="mcp_tool_use",
+            )
+            allow_mcp_tools = True
+            approved_by = approved_by or approval.approved_by
+
         result = await orchestrator.run_full_red_team(
             target_url=request.target_url,
             github_url=request.github_url,
+            allow_browser_automation=allow_browser_automation,
+            allow_mcp_tools=allow_mcp_tools,
+            approved_by=approved_by or "",
         )
         return {"status": "completed", "result": result}
     except SandboxVerificationError as exc:
@@ -248,4 +354,40 @@ async def run_single_skill(request: SingleSkillRequest) -> dict:
         raise HTTPException(status_code=403, detail=str(exc))
     except Exception as exc:
         logger.error("Skill execution error", error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/attack/dynamic/checks")
+async def execute_dynamic_checks(request: DynamicChecksExecutionRequest) -> dict:
+    """Execute approved read-only dynamic checks in a browser session."""
+    try:
+        validate_target_url(request.target_url)
+    except TargetNotAllowedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    approval = _require_execution_approval(request.execution_approval)
+    _require_browser_automation_approval(request.browser_automation_approval, purpose="playwright_dynamic_checks")
+
+    logger.info(
+        "Dynamic checks execution approved",
+        target=request.target_url,
+        approved_by=approval.approved_by,
+        selected_checks=len(request.selected_checks or []),
+    )
+
+    orchestrator = AttackOrchestrator(_build_gemini_client())
+    try:
+        report = await orchestrator.run_dynamic_checks(
+            request.target_url,
+            selected_checks=request.selected_checks,
+            allow_browser_automation=True,
+            approved_by=approval.approved_by,
+        )
+        return {"status": "completed", "report": report.model_dump()}
+    except SandboxVerificationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        logger.error("Dynamic checks execution error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc))

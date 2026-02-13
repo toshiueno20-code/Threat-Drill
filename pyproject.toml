@@ -10,7 +10,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.11"
 fastapi = "^0.109.0"
-uvicorn = {extras = ["standard"], version = "^0.27.0"}
+uvicorn = {extras = ["standard"], version = "^0.31.1"}
 google-cloud-aiplatform = "^1.42.0"
 google-cloud-firestore = "^2.14.0"
 google-cloud-pubsub = "^2.19.0"
@@ -25,10 +25,12 @@ pandas = "^2.1.4"
 scikit-learn = "^1.4.0"
 asyncio = "^3.4.3"
 aiohttp = "^3.9.1"
-python-multipart = "^0.0.6"
+python-multipart = "^0.0.9"
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 passlib = {extras = ["bcrypt"], version = "^1.7.4"}
-httpx = "^0.26.0"
+httpx = "^0.28.1"
+google-genai = "^1.13.0"
+mcp = "^1.13.0"
 opentelemetry-api = "^1.22.0"
 opentelemetry-sdk = "^1.22.0"
 opentelemetry-instrumentation-fastapi = "^0.43b0"

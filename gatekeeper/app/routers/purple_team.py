@@ -95,7 +95,8 @@ async def run_exercise(request: PurpleTeamExerciseRequest) -> dict:
 
     results["finished_at"] = datetime.utcnow().isoformat()
 
-    red_score = red_team_report.get("overall_score", 100) if red_team_report else None
+    # Red Team dynamic phase is plan-only by policy; score may be null unless checks were executed.
+    red_score = red_team_report.get("overall_score") if red_team_report else None
     blue_score = (
         results["blue_team"].get("posture", {}).get("defense_score", 100)
         if isinstance(results["blue_team"], dict)

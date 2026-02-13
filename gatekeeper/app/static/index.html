@@ -1311,7 +1311,7 @@
                             </div>
                             <div class="card-inner">
                                 <div style="display:flex;flex-direction:column;gap:10px;">
-                                    <button class="btn btn-red" onclick="switchTab('redteam')">&#x2694;&#xfe0f; Launch Red Team Attack</button>
+                                    <button class="btn btn-red" onclick="switchTab('redteam')">&#x2694;&#xfe0f; Launch Red Team Assessment</button>
                                     <button class="btn btn-blue" onclick="switchTab('blueteam')">&#x1f6e1;&#xfe0f; Run Blue Team Scan</button>
                                     <button class="btn btn-purple" onclick="switchTab('purpleteam')">&#x1f91d; Start Purple Team Exercise</button>
                                     <button class="btn btn-outline" onclick="window.open('/docs','_blank')">&#x1f4d6; API Documentation</button>
@@ -1348,7 +1348,7 @@
                     <div class="team-layout">
                         <div class="glass-card">
                             <div class="card-head">
-                                <h2><span class="team-dot red"></span>Attack Controls</h2>
+                                <h2><span class="team-dot red"></span>Assessment Controls</h2>
                             </div>
                             <div class="card-inner">
                                 <div class="controls-stack">
@@ -1361,16 +1361,33 @@
                                         <input type="text" id="githubUrl" placeholder="https://github.com/user/repo">
                                     </div>
                                     <div class="field">
-                                        <label>Attack Mode</label>
+                                        <label>Assessment Mode</label>
                                         <select id="attackMode">
                                             <option value="scenario">Single Skill</option>
-                                            <option value="dynamic">Full Dynamic Attack</option>
+                                            <option value="dynamic">Dynamic Assessment (Plan only)</option>
+                                            <option value="dynamic_checks">Dynamic Checks (Execute read-only)</option>
                                             <option value="static">Static Scan Only</option>
-                                            <option value="full">Full Pipeline (Static + Dynamic)</option>
+                                            <option value="full">Full Pipeline (Static + Plan)</option>
                                         </select>
                                     </div>
+                                    <div class="field" id="browserControls" style="display:block;">
+                                        <label>Browser Automation (Requires Approval)</label>
+                                        <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--border-dim);border-radius:12px;background:rgba(255,255,255,0.02);">
+                                            <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-200);">
+                                                <input type="checkbox" id="allowPlaywrightRecon">
+                                                Use Playwright browser reconnaissance (read-only)
+                                            </label>
+                                            <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-200);">
+                                                <input type="checkbox" id="allowMcpTools">
+                                                Allow Gemini to use Playwright MCP tools (read-only)
+                                            </label>
+                                            <div class="text-xs" style="color:var(--text-400);line-height:1.4;">
+                                                This app will request per-run approval before any browser automation. No autonomous exploit execution.
+                                            </div>
+                                        </div>
+                                    </div>
                                     <div class="field" id="skillSelector">
-                                        <label>Select Attack Skill</label>
+                                        <label>Select Security Check</label>
                                         <div class="skill-grid" id="skillGrid">
                                             <div class="empty-state"><div class="spinner sp-red"></div><div class="mt-2 text-sm">Loading skills...</div></div>
                                         </div>
@@ -1871,7 +1888,7 @@
             const r = await fetch('/api/v1/security/events');
             if (r.ok) {
                 const d = await r.json();
-                securityEvents = d.events || [];
+                securityEvents = Array.isArray(d) ? d : (d.events || []);
                 if (securityEvents.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon">&#x1f4ed;</div><div>No security events yet</div></td></tr>';
                     return;
@@ -1881,8 +1898,8 @@
                 tbody.innerHTML = securityEvents.slice(0, 10).map(e => `
                     <tr>
                         <td class="font-mono text-xs">${new Date(e.timestamp).toLocaleTimeString()}</td>
-                        <td>${esc(e.type || 'Analysis')}</td>
-                        <td><span class="threat-pill threat-${e.threat_level || 'safe'}">${esc(e.threat_level || 'safe')}</span></td>
+                        <td>${esc(e.type || 'SecurityAnalysis')}</td>
+                        <td><span class="threat-pill threat-${(e.threat_analysis && e.threat_analysis.threat_level) ? e.threat_analysis.threat_level : 'safe'}">${esc((e.threat_analysis && e.threat_analysis.threat_level) ? e.threat_analysis.threat_level : 'safe')}</span></td>
                         <td class="font-mono text-xs">${esc(e.source_ip || '--')}</td>
                     </tr>
                 `).join('');
@@ -2010,8 +2027,15 @@
         const targetUrl = document.getElementById('targetUrl').value;
         const githubUrl = document.getElementById('githubUrl').value;
         const mode = document.getElementById('attackMode').value;
-        if (!targetUrl) { tlog('red', 'err', 'Target URL is required'); return; }
-        if (!checkTargetUrl('targetUrl', 'red')) return;
+        if (mode === 'static') {
+            if (!githubUrl) { tlog('red', 'err', 'GitHub URL is required for static scan'); return; }
+        } else if (mode === 'dynamic_checks') {
+            if (!targetUrl) { tlog('red', 'err', 'Target URL is required'); return; }
+            if (!checkTargetUrl('targetUrl', 'red')) return;
+        } else {
+            if (!targetUrl) { tlog('red', 'err', 'Target URL is required'); return; }
+            if (!checkTargetUrl('targetUrl', 'red')) return;
+        }
         if (mode === 'scenario' && !selectedSkill) { tlog('red', 'err', 'Please select a security check skill'); return; }
 
         let executionApproval = null;
@@ -2038,6 +2062,63 @@
                 approved_by: approvedBy.trim(),
                 approval_note: approvalNote.trim(),
             };
+        } else if (mode === 'dynamic_checks') {
+            const confirmed = window.confirm(
+                `Execute read-only dynamic checks in a browser session on ${targetUrl}?\n\n` +
+                `This will NOT run exploit payloads or destructive actions. It will only inspect page-visible state and response metadata.`
+            );
+            if (!confirmed) {
+                tlog('red', 'warn', 'Execution cancelled. User approval is required for each run.');
+                return;
+            }
+
+            const approvedBy = window.prompt('Enter approver name or id for audit logging:', 'local-user') || '';
+            if (!approvedBy.trim()) {
+                tlog('red', 'err', 'Execution cancelled: approver is required.');
+                return;
+            }
+
+            const approvalNote = window.prompt(
+                'Optional approval note:',
+                'Manually approved read-only dynamic checks'
+            ) || '';
+
+            executionApproval = {
+                approved: true,
+                approved_by: approvedBy.trim(),
+                approval_note: approvalNote.trim(),
+            };
+        }
+
+        let browserApproval = null;
+        const wantsPlaywright = !!document.getElementById('allowPlaywrightRecon')?.checked;
+        const wantsMcp = !!document.getElementById('allowMcpTools')?.checked;
+        if ((mode === 'dynamic' || mode === 'full') && (wantsPlaywright || wantsMcp)) {
+            const confirmed = window.confirm(
+                `Allow browser automation (Playwright/MCP) for read-only reconnaissance on ${targetUrl}?\n\n` +
+                `This does not execute exploit payloads, and does not run security skills automatically.`
+            );
+            if (!confirmed) {
+                tlog('red', 'warn', 'Browser automation cancelled. Approval is required for each run.');
+                return;
+            }
+
+            const approvedBy = window.prompt('Enter approver name or id for audit logging:', 'local-user') || '';
+            if (!approvedBy.trim()) {
+                tlog('red', 'err', 'Browser automation cancelled: approver is required.');
+                return;
+            }
+
+            const approvalNote = window.prompt(
+                'Optional approval note:',
+                'Approved read-only browser reconnaissance for security assessment'
+            ) || '';
+
+            browserApproval = {
+                approved: true,
+                approved_by: approvedBy.trim(),
+                approval_note: approvalNote.trim(),
+            };
         }
 
         isRunning = true;
@@ -2054,31 +2135,95 @@
                 break;
             case 'dynamic':
                 endpoint = '/api/v1/red-team/attack/dynamic';
-                body = { target_url: targetUrl };
+                body = {
+                    target_url: targetUrl,
+                    browser_automation_approval: wantsPlaywright ? browserApproval : null,
+                    mcp_tools_approval: wantsMcp ? browserApproval : null,
+                };
                 cmdText = `assess --mode dynamic --target ${targetUrl}`;
                 break;
+            case 'dynamic_checks': {
+                endpoint = '/api/v1/red-team/attack/dynamic/checks';
+                // Prefer last generated plan if present (and same target); otherwise run all checks.
+                let selectedChecks = null;
+                try {
+                    const last = window.lastRedReport || null;
+                    const plan = last ? (last.vulnerability_check_plan || last.attack_plan) : null;
+                    if (plan && Array.isArray(plan.priority_order) && plan.priority_order.length > 0 && (last.target_url === targetUrl)) {
+                        selectedChecks = plan.priority_order;
+                    }
+                } catch {}
+                body = {
+                    target_url: targetUrl,
+                    selected_checks: selectedChecks,
+                    execution_approval: executionApproval,
+                    browser_automation_approval: executionApproval,
+                };
+                cmdText = `assess --mode dynamic_checks --target ${targetUrl}`;
+                break;
+            }
             case 'static':
                 endpoint = '/api/v1/red-team/scan/static';
-                body = { github_url: githubUrl || targetUrl };
-                cmdText = `scan --mode static --repo ${githubUrl || targetUrl}`;
+                body = { github_url: githubUrl };
+                cmdText = `scan --mode static --repo ${githubUrl}`;
                 break;
             case 'full':
                 endpoint = '/api/v1/red-team/attack/full';
-                body = { target_url: targetUrl, github_url: githubUrl || null };
+                body = {
+                    target_url: targetUrl,
+                    github_url: githubUrl || null,
+                    browser_automation_approval: wantsPlaywright ? browserApproval : null,
+                    mcp_tools_approval: wantsMcp ? browserApproval : null,
+                };
                 cmdText = `assess --mode full --target ${targetUrl}`;
                 break;
         }
 
+        const startMessages = {
+            scenario: 'Starting approved security check...',
+            dynamic: 'Generating vulnerability check plan...',
+            dynamic_checks: 'Executing read-only dynamic checks...',
+            static: 'Running static vulnerability checks...',
+            full: 'Running static checks and generating vulnerability check plan...',
+        };
+        const doneMessages = {
+            scenario: 'Security check completed successfully',
+            dynamic: 'Assessment completed successfully',
+            dynamic_checks: 'Dynamic checks completed successfully',
+            static: 'Static scan completed successfully',
+            full: 'Assessment completed successfully',
+        };
+
         tcmd('red', cmdText);
-        tlog('red', 'info', mode === 'scenario' ? 'Starting approved security check...' : 'Generating vulnerability check plan...');
+        tlog('red', 'info', startMessages[mode] || 'Running assessment...');
 
         try {
             const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             const data = await r.json();
             if (!r.ok) throw new Error(data.detail || 'Request failed');
-            tlog('red', 'ok', mode === 'scenario' ? 'Security check completed successfully' : 'Assessment completed successfully');
-            displayResult('red', data.result || data.report || data);
+            tlog('red', 'ok', doneMessages[mode] || 'Assessment completed successfully');
+            const payload = data.result || data.report || data;
+            // Keep a small amount of state so users can run planned checks next.
+            try { if (payload && typeof payload === 'object') window.lastRedReport = payload; } catch {}
+            displayResult('red', payload);
             setTimeout(fetchEvents, 1000);
+
+            // UX: after plan-only mode, ask whether to continue with approved dynamic checks execution.
+            if (mode === 'dynamic') {
+                const plan = payload ? (payload.vulnerability_check_plan || payload.attack_plan) : null;
+                const planned = plan && Array.isArray(plan.priority_order) ? plan.priority_order.length : 0;
+                if (planned > 0) {
+                    const cont = window.confirm(
+                        `A vulnerability check plan was generated (${planned} planned checks).\n\n` +
+                        `Do you want to continue and execute the planned read-only checks now?\n` +
+                        `This requires explicit approval and uses Playwright browser automation.`
+                    );
+                    if (cont) {
+                        document.getElementById('attackMode').value = 'dynamic_checks';
+                        await runAttack();
+                    }
+                }
+            }
         } catch (e) {
             tlog('red', 'err', `Error: ${e.message}`);
         } finally {
@@ -2178,7 +2323,6 @@
                 document.getElementById('purpleRedScore').textContent = summary.red_team_score;
                 setRing('redRing', 100 - summary.red_team_score);
                 document.getElementById('redBar').style.width = `${100 - summary.red_team_score}%`;
-                tlog('purple', 'info', `Red Team Score: ${summary.red_team_score}/100`);
             }
             if (summary.blue_team_score != null) {
                 document.getElementById('purpleBlueScore').textContent = summary.blue_team_score;
@@ -2198,7 +2342,9 @@
             if (result.red_team && !result.red_team.error) {
                 const rt = result.red_team;
                 const rtChecks = rt.check_results || rt.attack_results || [];
-                tlog('purple', 'info', `Red Team: Score ${rt.overall_score || '--'}/100, ${rtChecks.length} checks`);
+                const rtPlan = rt.vulnerability_check_plan || rt.attack_plan;
+                const planned = (rtPlan && rtPlan.priority_order) ? rtPlan.priority_order.length : 0;
+                tlog('purple', 'info', `Red Team: planned_checks=${planned}, executed_checks=${rtChecks.length}`);
             }
             if (result.blue_team && !result.blue_team.error) {
                 const bt = result.blue_team;
@@ -2320,20 +2466,110 @@
         if (result.skill_name) tlog(team, 'info', `Skill: ${result.skill_name}`);
         if (result.success !== undefined) tlog(team, result.success ? 'warn' : 'ok', `Vulnerability: ${result.success}`);
         if (result.severity) tlog(team, result.severity === 'critical' || result.severity === 'high' ? 'err' : 'warn', `Severity: ${result.severity}`);
+        if (result.repository_url) tlog(team, 'info', `Repository: ${result.repository_url}`);
         if (result.evidence && result.evidence.length > 0) {
             tlog(team, 'warn', `Evidence: ${result.evidence.length} item(s)`);
             result.evidence.forEach((e, i) => tlog(team, 'info', `  ${i + 1}. ${typeof e === 'string' ? e : JSON.stringify(e)}`));
         }
-        if (result.overall_score !== undefined) tlog(team, 'info', `Overall Score: ${result.overall_score}/100`);
         const checkResults = result.check_results || result.attack_results || [];
+        const plan = result.vulnerability_check_plan || result.attack_plan;
+        const isStaticResult = !!result.repository_url && !!result.scan_metadata;
+        const isPlanOnly = !!plan && (!Array.isArray(checkResults) || checkResults.length === 0);
+        if (team === 'red' && isPlanOnly) {
+            tlog(team, 'info', 'Execution: plan-only (no checks executed; explicit approval is required per check).');
+        }
+
+        if (result.scan_metadata) {
+            const meta = result.scan_metadata;
+            const totalFiles = meta.total_files_scanned ?? 0;
+            tlog(team, 'info', `Files scanned: ${totalFiles}`);
+            if (meta.analysis_engine) tlog(team, 'info', `Analysis engine: ${meta.analysis_engine}`);
+            if (meta.ai_enabled !== undefined) tlog(team, 'info', `AI enabled: ${meta.ai_enabled}`);
+            if (meta.ai_status) tlog(team, 'info', `AI status: ${meta.ai_status}`);
+            const classified = meta.classified_files || {};
+            const classifiedTotal = Object.values(classified).reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0);
+            tlog(team, 'info', `Classified files: ${classifiedTotal}`);
+            ['system_prompts', 'tool_definitions', 'api_keys_files', 'config_files', 'rag_configs', 'code_files'].forEach((key) => {
+                if ((classified[key] ?? 0) > 0) {
+                    tlog(team, 'info', `  - ${key}: ${classified[key]}`);
+                }
+            });
+        }
+
+        if (result.assessment_quality) {
+            const level = result.assessment_quality === 'normal_coverage' ? 'ok' : 'warn';
+            const msg = result.coverage_message || `Assessment quality: ${result.assessment_quality}`;
+            tlog(team, level, msg);
+        }
+
+        const riskSummary = result.risk_summary || {};
+        const riskTotal = Object.values(riskSummary).reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0);
+        if (riskTotal > 0) {
+            tlog(team, 'warn', `Risk summary: critical=${riskSummary.critical || 0}, high=${riskSummary.high || 0}, medium=${riskSummary.medium || 0}, low=${riskSummary.low || 0}`);
+        }
+
+        const vulnerabilities = Array.isArray(result.vulnerabilities) ? result.vulnerabilities : [];
+        if (result.vulnerabilities_count !== undefined || vulnerabilities.length > 0) {
+            const count = result.vulnerabilities_count ?? vulnerabilities.length;
+            tlog(team, count > 0 ? 'warn' : 'ok', `Vulnerabilities reported: ${count}`);
+        }
+        if (vulnerabilities.length > 0) {
+            vulnerabilities.slice(0, 10).forEach((v, i) => {
+                const sev = v.severity || 'unknown';
+                const title = v.title || v.type || 'Unnamed finding';
+                const level = sev === 'critical' || sev === 'high' ? 'err' : 'warn';
+                tlog(team, level, `  ${i + 1}. [${sev}] ${title}`);
+            });
+        } else if (result.repository_url) {
+            tlog(team, 'info', 'No vulnerabilities were reported by current static checks.');
+        }
+
+        const recommendations = Array.isArray(result.recommendations) ? result.recommendations : [];
+        if (recommendations.length > 0) {
+            tlog(team, 'ok', 'Recommendations:');
+            recommendations.slice(0, 5).forEach((rec, i) => tlog(team, 'ok', `  ${i + 1}. ${rec}`));
+        }
+
         if (checkResults && checkResults.length > 0) {
             checkResults.forEach(ar => {
                 const tag = ar.success ? 'VULN' : 'PASS';
                 tlog(team, ar.success ? 'err' : 'ok', `  [${tag}] ${ar.skill_name} - ${ar.severity}`);
             });
         }
-        const plan = result.vulnerability_check_plan || result.attack_plan;
+        if (result.assessment_metadata && typeof result.assessment_metadata === 'object') {
+            const m = result.assessment_metadata;
+            const approvals = m.approvals || {};
+            const recon = m.recon || {};
+            const ai = m.ai || {};
+
+            const uniq = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter(Boolean))];
+
+            if (approvals.approved_by || approvals.allow_browser_automation || approvals.allow_mcp_tools) {
+                tlog(team, 'info', `Approvals: approved_by=${approvals.approved_by || '(none)'}, browser_automation=${!!approvals.allow_browser_automation}, mcp_tools=${!!approvals.allow_mcp_tools}`);
+            }
+
+            if (recon.method) {
+                const tools = uniq((recon.tool_calls || []).map(x => x.tool));
+                const toolNote = tools.length > 0 ? `, tools=[${tools.slice(0, 8).join(', ')}${tools.length > 8 ? ', ...' : ''}]` : '';
+                tlog(team, 'info', `Recon: method=${recon.method}, tool_calls=${recon.tool_calls_count ?? 0}${toolNote}`);
+            }
+
+            if (ai.engine || ai.model_version) {
+                const fcs = Array.isArray(ai.mcp_function_calls) ? ai.mcp_function_calls : [];
+                const fcNames = uniq(fcs.map(fc => fc.name));
+                const fcNote = fcNames.length > 0 ? `, calls=[${fcNames.slice(0, 8).join(', ')}${fcNames.length > 8 ? ', ...' : ''}]` : '';
+                tlog(team, 'info', `AI: enabled=${ai.enabled ?? 'n/a'}, engine=${ai.engine || 'unknown'}, model=${ai.model_version || 'unknown'}, fallback=${!!ai.provider_fallback}, duration_ms=${ai.analysis_duration_ms ?? 'n/a'}, tokens=${ai.tokens_used ?? 'n/a'}, mcp_used=${!!ai.mcp_used}, mcp_calls=${ai.mcp_function_calls_count ?? 0}${fcNote}`);
+                if (ai.mcp_available_tools_count != null) {
+                    tlog(team, 'info', `MCP tools: available=${ai.mcp_available_tools_count}, max_remote_calls=${ai.mcp_max_remote_calls ?? 'n/a'}`);
+                }
+            }
+        }
         if (plan && plan.priority_order) {
+            if (plan.reasoning) {
+                const r = String(plan.reasoning);
+                const trimmed = r.length > 400 ? (r.slice(0, 400) + '...') : r;
+                tlog(team, 'info', `Plan reasoning: ${trimmed}`);
+            }
             tlog(team, 'info', `Planned checks: ${(plan.priority_order || []).length}`);
             (plan.priority_order || []).slice(0, 10).forEach((name, idx) => {
                 tlog(team, 'info', `  ${idx + 1}. ${name}`);

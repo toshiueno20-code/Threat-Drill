@@ -1,5 +1,7 @@
 """Main FastAPI application for Gatekeeper."""
 
+import asyncio
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
@@ -14,6 +16,14 @@ from prometheus_client import make_asgi_app
 
 from ..config import settings
 from shared.utils import setup_logger, get_logger, MetricsCollector
+
+# Windows: prefer subprocess-capable event loop (Playwright/MCP needs this).
+# Some servers/libraries may pick Selector loop, which breaks asyncio subprocess APIs.
+if os.name == "nt":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
 
 # ロガーとメトリクスの初期化
 setup_logger(log_level=settings.log_level, json_logs=settings.json_logs)
