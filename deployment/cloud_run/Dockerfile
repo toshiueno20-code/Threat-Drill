@@ -1,39 +1,53 @@
-# Threat Drill Gatekeeper - Cloud Run Dockerfile
+# ThreatDrill Gatekeeper - Cloud Run Dockerfile
 
 FROM python:3.11-slim
 
-# 作業ディレクトリの設定
 WORKDIR /app
 
-# システムパッケージのインストール
-RUN apt-get update && apt-get install -y \
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    # Install Playwright browsers into a shared path so a non-root user can run them.
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# System packages:
+# - build tools for wheels (uvicorn[standard] deps, etc.)
+# - curl/ca-certificates used by build steps and healthcheck
+# - nodejs/npm is used when enabling the optional Gemini Playwright MCP path (npx @playwright/mcp@latest)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
+    ca-certificates \
+    curl \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Poetry のインストール
+# Poetry
 RUN pip install poetry==1.7.1
 
-# 依存関係ファイルのコピー
+# Install dependencies first for better Docker layer caching
 COPY pyproject.toml poetry.lock* ./
-
-# 依存関係のインストール（仮想環境を作成しない）
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root --only main
 
-# アプリケーションコードのコピー
+# Install Playwright browser binaries (Chromium) + OS deps at build time
+RUN mkdir -p "${PLAYWRIGHT_BROWSERS_PATH}" \
+    && python -m playwright install --with-deps chromium
+
+# Copy application code
 COPY . .
 
-# ポートの公開
 EXPOSE 8080
 
-# 非rootユーザーの作成と切り替え
-RUN useradd -m -u 1000 threatdrill && chown -R threatdrill:threatdrill /app
+# Run as non-root
+RUN useradd -m -u 1000 threatdrill \
+    && chown -R threatdrill:threatdrill /app "${PLAYWRIGHT_BROWSERS_PATH}"
 USER threatdrill
 
-# ヘルスチェック
+# Optional: Docker healthcheck (Cloud Run doesn't require it)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8080/health')"
+    CMD python -c "import os, urllib.request; port=os.environ.get('PORT','8080'); urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=5).read()"
 
-# アプリケーションの起動
-CMD ["uvicorn", "gatekeeper.app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]
+# Cloud Run sets $PORT; keep workers configurable for memory-sensitive Playwright runs.
+CMD ["sh", "-c", "uvicorn gatekeeper.app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers ${WEB_CONCURRENCY:-1}"]
