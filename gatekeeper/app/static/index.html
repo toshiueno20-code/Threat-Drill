@@ -2027,7 +2027,7 @@
         // Red Team: keep the demo focused (planning is fine, execution limited to curated skills).
         const attackMode = document.getElementById('attackMode');
         if (attackMode) {
-            const allowed = new Set(['scenario', 'dynamic']);
+            const allowed = new Set(['scenario', 'dynamic', 'dynamic_checks', 'static']);
             for (const opt of Array.from(attackMode.options)) {
                 const isAllowed = allowed.has(opt.value);
                 opt.disabled = !isAllowed;
@@ -3070,6 +3070,31 @@
 
         if (runRed && !checkTargetUrl('purpleTargetUrl', 'purple')) return;
 
+        // Optional: allow Red Team read-only check execution inside the exercise.
+        // We keep explicit human approval even in hackathon mode.
+        let redExecApproval = null;
+        let redBrowserApproval = null;
+        if (runRed) {
+            const confirmed = window.confirm(
+                `Run Red Team read-only checks against ${targetUrl} as part of this Purple Team exercise?\n\n` +
+                `This will generate a plan and then execute the planned read-only checks in a browser session.\n` +
+                `Explicit approval is required.`
+            );
+            if (confirmed) {
+                const approvedBy = window.prompt('Enter approver name or id for audit logging:', 'local-user') || '';
+                if (!approvedBy.trim()) {
+                    tlog('purple', 'err', 'Red Team execution cancelled: approver is required.');
+                    return;
+                }
+                const approvalNote = window.prompt(
+                    'Optional approval note:',
+                    'Approved read-only Red Team checks as part of Purple Team exercise'
+                ) || '';
+                redExecApproval = { approved: true, approved_by: approvedBy.trim(), approval_note: approvalNote.trim() };
+                redBrowserApproval = { approved: true, approved_by: approvedBy.trim(), approval_note: approvalNote.trim() };
+            }
+        }
+
         isPurpleRunning = true;
         const btn = document.getElementById('runExerciseBtn');
         btn.disabled = true;
@@ -3084,7 +3109,13 @@
             const r = await fetch('/api/v1/purple-team/exercise', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ target_url: targetUrl, test_payload: payload, run_red_team: runRed })
+                body: JSON.stringify({
+                    target_url: targetUrl,
+                    test_payload: payload,
+                    run_red_team: runRed,
+                    execution_approval: redExecApproval,
+                    browser_automation_approval: redBrowserApproval,
+                })
             });
             const data = await r.json();
             if (!r.ok) throw new Error(data.detail || 'Exercise failed');
@@ -3094,9 +3125,13 @@
 
             const summary = result.summary || {};
             if (summary.red_team_score != null) {
-                document.getElementById('purpleRedScore').textContent = summary.red_team_score;
-                setRing('redRing', 100 - summary.red_team_score);
-                document.getElementById('redBar').style.width = `${100 - summary.red_team_score}%`;
+                // red_team_score is a posture-style score (0-100, higher is safer).
+                // Purple "Attack" UI shows attack effectiveness = (100 - posture_score).
+                const posture = Number(summary.red_team_score);
+                const attackEff = Math.max(0, Math.min(100, 100 - posture));
+                document.getElementById('purpleRedScore').textContent = `${attackEff}`;
+                setRing('redRing', attackEff);
+                document.getElementById('redBar').style.width = `${attackEff}%`;
             }
             if (summary.blue_team_score != null) {
                 document.getElementById('purpleBlueScore').textContent = summary.blue_team_score;
