@@ -192,8 +192,8 @@
 
         .brand-icon::before {
             content: '';
-            width: 26px;
-            height: 26px;
+            width: 44px;
+            height: 44px;
             background: url('/static/assets/icons/brand.png') center/contain no-repeat;
             filter: drop-shadow(0 2px 10px rgba(0,0,0,0.25));
             opacity: 0.95;
@@ -719,7 +719,8 @@
            ================================================================ */
         .skill-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            /* minmax(0,1fr) prevents long content from forcing columns wider than the container */
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 8px;
             max-height: 280px;
             overflow-y: auto;
@@ -741,6 +742,7 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
+            min-width: 0;
         }
 
         .skill-btn:hover {
@@ -759,8 +761,63 @@
             background: var(--blue-glow);
             box-shadow: var(--shadow-glow-blue);
         }
-        .skill-btn .sk-name { font-weight: 700; margin-bottom: 3px; line-height: 1.3; }
-        .skill-btn .sk-desc { font-size: 10px; color: var(--text-400); line-height: 1.3; margin-bottom: 4px; }
+
+        .skill-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            border-style: dashed;
+            transform: none !important;
+        }
+        .skill-btn:disabled:hover {
+            border-color: var(--border-subtle);
+            background: var(--bg-deep);
+            transform: none;
+        }
+
+        .sk-foot {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+        }
+
+        .sk-pill {
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--border-dim);
+            color: var(--text-300);
+            align-self: flex-start;
+            max-width: 100%;
+            white-space: normal;
+        }
+        .sk-pill.pill-demo {
+            border-color: rgba(0, 214, 143, 0.30);
+            background: rgba(0, 214, 143, 0.10);
+            color: var(--success);
+        }
+        .sk-pill.pill-tbc {
+            border-color: rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-400);
+        }
+
+        .demo-note {
+            margin-top: 6px;
+            padding: 9px 10px;
+            border-radius: 10px;
+            border: 1px solid var(--border-dim);
+            background: rgba(255,255,255,0.02);
+            color: var(--text-400);
+            font-size: 11px;
+            line-height: 1.45;
+        }
+        .demo-note strong { color: var(--text-200); }
+        .skill-btn .sk-name { font-weight: 700; margin-bottom: 3px; line-height: 1.3; word-break: break-word; }
+        .skill-btn .sk-desc { font-size: 10px; color: var(--text-400); line-height: 1.3; margin-bottom: 4px; word-break: break-word; }
         .skill-btn .sk-meta { font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
         .sev-critical { color: var(--danger) !important; }
         .sev-high     { color: #f97316 !important; }
@@ -1555,6 +1612,10 @@
                                     </div>
                                     <div class="field" id="skillSelector">
                                         <label>Select Security Check</label>
+                                        <div class="demo-note" data-demo-only style="display:none">
+                                            <strong>Hackathon Demo:</strong> すべてのスキルは表示しますが、実行できるのは「生成AI App検査」用の5スキルのみです。<br>
+                                            それ以外は <span class="text-muted">To be continued</span>（今後対応予定）として選択できないようにしています。
+                                        </div>
                                         <div class="skill-grid" id="skillGrid">
                                             <div class="empty-state"><div class="spinner sp-red"></div><div class="mt-2 text-sm">Loading skills...</div></div>
                                         </div>
@@ -1614,6 +1675,10 @@
                                     </div>
                                     <div class="field" id="defenseSkillSelector" style="display:none">
                                         <label>Select Defense Skill</label>
+                                        <div class="demo-note" data-demo-only style="display:none">
+                                            <strong>Hackathon Demo:</strong> すべてのスキルは表示しますが、実行できるのは「生成AI App検査」用の5スキルのみです。<br>
+                                            それ以外は <span class="text-muted">To be continued</span>（今後対応予定）として選択できないようにしています。
+                                        </div>
                                         <div class="skill-grid" id="defenseSkillGrid">
                                             <div class="empty-state"><div class="spinner sp-blue"></div><div class="mt-2 text-sm">Loading skills...</div></div>
                                         </div>
@@ -1921,6 +1986,74 @@
     const RING_CIRCUM = 326.73; // 2 * PI * 52
     let securityEvents = [];
     let stats = { totalRequests: 0, threatsBlocked: 0 };
+
+    // ==================================================================
+    // Hackathon demo gating (show all, allow only a small curated subset)
+    // ==================================================================
+    const HACKATHON_DEMO_MODE = true;
+    const DEMO_RED_SKILLS = new Set([
+        // OWASP for LLM Applications (curated for hackathon demo)
+        'owasp_llm01_prompt_injection',
+        'owasp_llm02_sensitive_disclosure',
+        'owasp_llm05_improper_output',
+        'owasp_llm06_excessive_agency',
+        'owasp_llm07_system_prompt_leakage',
+    ]);
+    const DEMO_BLUE_SKILLS = new Set([
+        // GenAI App inspection-oriented defense skills
+        'prompt_injection_detector',
+        'jailbreak_detector',
+        'data_exfiltration_detector',
+        'input_validator',
+        'output_sanitizer',
+    ]);
+
+    function _isSkillEnabled(team, skillName) {
+        if (!HACKATHON_DEMO_MODE) return true;
+        if (team === 'red') return DEMO_RED_SKILLS.has(skillName);
+        if (team === 'blue') return DEMO_BLUE_SKILLS.has(skillName);
+        return true;
+    }
+
+    function _applyDemoNotes() {
+        document.querySelectorAll('[data-demo-only]').forEach(el => {
+            el.style.display = HACKATHON_DEMO_MODE ? 'block' : 'none';
+        });
+    }
+
+    function _applyHackathonModeControls() {
+        if (!HACKATHON_DEMO_MODE) return;
+
+        // Red Team: keep the demo focused (planning is fine, execution limited to curated skills).
+        const attackMode = document.getElementById('attackMode');
+        if (attackMode) {
+            const allowed = new Set(['scenario', 'dynamic']);
+            for (const opt of Array.from(attackMode.options)) {
+                const isAllowed = allowed.has(opt.value);
+                opt.disabled = !isAllowed;
+                if (!isAllowed && !opt.dataset.tbcApplied) {
+                    opt.textContent = `${opt.textContent} (TBC)`;
+                    opt.dataset.tbcApplied = '1';
+                }
+            }
+            if (!allowed.has(attackMode.value)) attackMode.value = 'scenario';
+        }
+
+        // Blue Team: run only curated GenAI inspection skills during the demo.
+        const defenseMode = document.getElementById('defenseMode');
+        if (defenseMode) {
+            const allowed = new Set(['skill']);
+            for (const opt of Array.from(defenseMode.options)) {
+                const isAllowed = allowed.has(opt.value);
+                opt.disabled = !isAllowed;
+                if (!isAllowed && !opt.dataset.tbcApplied) {
+                    opt.textContent = `${opt.textContent} (TBC)`;
+                    opt.dataset.tbcApplied = '1';
+                }
+            }
+            defenseMode.value = 'skill';
+        }
+    }
 
     // Assessment run history (stored locally for log detail view)
     const RUNS_STORAGE_KEY = 'threatdrill_assessment_runs_v1';
@@ -2398,49 +2531,102 @@
     // Red Team Skills
     // ==================================================================
     let _redSkillsLoaded = false;
+    let _redSkillsLoading = null;
 
     async function loadSkills() {
         if (_redSkillsLoaded && availableSkills.length > 0) {
             _renderRedSkills();
             return;
         }
+        if (_redSkillsLoading) return _redSkillsLoading;
         const grid = document.getElementById('skillGrid');
-        try {
-            const r = await api('/api/v1/red-team/scenarios');
-            if (!r.ok) throw new Error(`API Error ${r.status}`);
-            const d = await r.json();
-            availableSkills = d.scenarios || [];
-            _redSkillsLoaded = true;
-            if (availableSkills.length === 0) {
-                grid.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="tools"></div><div>No security check skills registered</div></div>';
-                return;
+
+        _redSkillsLoading = (async () => {
+            try {
+                const r = await api('/api/v1/red-team/scenarios');
+                if (!r.ok) throw new Error(`API Error ${r.status}`);
+                const d = await r.json();
+                availableSkills = d.scenarios || [];
+                _redSkillsLoaded = true;
+                if (availableSkills.length === 0) {
+                    grid.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="tools"></div><div>No security check skills registered</div></div>';
+                    return;
+                }
+                _renderRedSkills();
+                document.getElementById('activeAttackSkills').textContent = availableSkills.length;
+                document.getElementById('redSkillCount').textContent = availableSkills.length;
+                const enabled = availableSkills.filter(s => _isSkillEnabled('red', s.skill_name)).length;
+                tlog('red', 'ok', `Loaded ${availableSkills.length} security check skills (Demo enabled: ${enabled}, TBC: ${availableSkills.length - enabled})`);
+            } catch (e) {
+                const msg = e.name === 'AbortError' ? 'Request timeout' : (e.message || 'Error');
+                grid.innerHTML = `<div class="empty-state"><div class="es-icon">!</div><div>Failed to load skills</div><div class="text-sm mt-2" style="color:var(--red-bright)">${esc(msg)}</div></div>`;
+                tlog('red', 'err', `Failed to load skills: ${msg}`);
+            } finally {
+                _redSkillsLoading = null;
             }
-            _renderRedSkills();
-            document.getElementById('activeAttackSkills').textContent = availableSkills.length;
-            document.getElementById('redSkillCount').textContent = availableSkills.length;
-            tlog('red', 'ok', `Loaded ${availableSkills.length} security check skills`);
-        } catch (e) {
-            const msg = e.name === 'AbortError' ? 'Request timeout' : (e.message || 'Error');
-            grid.innerHTML = `<div class="empty-state"><div class="es-icon">!</div><div>Failed to load skills</div><div class="text-sm mt-2" style="color:var(--red-bright)">${esc(msg)}</div></div>`;
-            tlog('red', 'err', `Failed to load skills: ${msg}`);
-        }
+        })();
+
+        return _redSkillsLoading;
     }
 
     function _renderRedSkills() {
         const grid = document.getElementById('skillGrid');
-        grid.innerHTML = availableSkills.map(s => `
-            <button class="skill-btn sk-red" data-skill="${s.skill_name}" onclick="selectSkill('${s.skill_name}')">
-                <div class="sk-name">${esc(s.display_name || s.skill_name)}</div>
-                <div class="sk-desc">${esc(s.description || '')}</div>
-                <div class="sk-meta sev-${s.severity}">${esc(s.severity)}</div>
-            </button>
-        `).join('');
+        grid.innerHTML = availableSkills.map(s => {
+            const name = s.skill_name;
+            const enabled = _isSkillEnabled('red', name);
+            const pill = enabled ? '<span class="sk-pill pill-demo">DEMO</span>' : '<span class="sk-pill pill-tbc">TBC</span>';
+            const title = enabled
+                ? 'Demo-enabled skill'
+                : 'Hackathon demo: this skill is shown for roadmap, but not executable yet.';
+            return `
+                <button type="button" class="skill-btn sk-red" data-skill="${esc(name)}" ${enabled ? '' : 'disabled'} title="${esc(title)}">
+                    <div class="sk-name">${esc(s.display_name || name)}</div>
+                    <div class="sk-desc">${esc(s.description || '')}</div>
+                    <div class="sk-foot">
+                        <div class="sk-meta sev-${esc(s.severity || 'info')}">${esc(s.severity || 'info')}</div>
+                        ${pill}
+                    </div>
+                </button>
+            `;
+        }).join('');
     }
 
     function selectSkill(name) {
+        if (!_isSkillEnabled('red', name)) {
+            tlog('red', 'warn', `To be continued: '${name}' is not enabled in Hackathon demo mode.`);
+            return;
+        }
         selectedSkill = name;
         document.querySelectorAll('#skillGrid .skill-btn').forEach(b => b.classList.toggle('active', b.dataset.skill === name));
         tlog('red', 'info', `Selected: ${name}`);
+    }
+
+    let _skillGridHandlersAttached = false;
+    function _attachSkillGridClickHandlers() {
+        if (_skillGridHandlersAttached) return;
+        _skillGridHandlersAttached = true;
+
+        const redGrid = document.getElementById('skillGrid');
+        if (redGrid) {
+            redGrid.addEventListener('click', (e) => {
+                const btn = e.target.closest('button.skill-btn');
+                if (!btn || btn.disabled) return;
+                const name = btn.dataset.skill;
+                if (!name) return;
+                selectSkill(name);
+            });
+        }
+
+        const blueGrid = document.getElementById('defenseSkillGrid');
+        if (blueGrid) {
+            blueGrid.addEventListener('click', (e) => {
+                const btn = e.target.closest('button.skill-btn');
+                if (!btn || btn.disabled) return;
+                const name = btn.dataset.skill;
+                if (!name) return;
+                selectDefenseSkill(name);
+            });
+        }
     }
 
     document.getElementById('attackMode').addEventListener('change', function() {
@@ -2501,46 +2687,71 @@
     // Blue Team Skills
     // ==================================================================
     let _blueSkillsLoaded = false;
+    let _blueSkillsLoading = null;
 
     async function loadDefenseSkills() {
         if (_blueSkillsLoaded && availableDefenseSkills.length > 0) {
             _renderBlueSkills();
             return;
         }
+        if (_blueSkillsLoading) return _blueSkillsLoading;
         const grid = document.getElementById('defenseSkillGrid');
-        try {
-            const r = await api('/api/v1/blue-team/scenarios');
-            if (!r.ok) throw new Error(`API Error ${r.status}`);
-            const d = await r.json();
-            availableDefenseSkills = d.scenarios || [];
-            _blueSkillsLoaded = true;
-            if (availableDefenseSkills.length === 0) {
-                grid.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="tools"></div><div>No defense skills registered</div></div>';
-                return;
+
+        _blueSkillsLoading = (async () => {
+            try {
+                const r = await api('/api/v1/blue-team/scenarios');
+                if (!r.ok) throw new Error(`API Error ${r.status}`);
+                const d = await r.json();
+                availableDefenseSkills = d.scenarios || [];
+                _blueSkillsLoaded = true;
+                if (availableDefenseSkills.length === 0) {
+                    grid.innerHTML = '<div class="empty-state"><div class="es-icon" data-ico="tools"></div><div>No defense skills registered</div></div>';
+                    return;
+                }
+                _renderBlueSkills();
+                document.getElementById('activeDefenseSkills').textContent = availableDefenseSkills.length;
+                document.getElementById('blueSkillCount').textContent = availableDefenseSkills.length;
+                const enabled = availableDefenseSkills.filter(s => _isSkillEnabled('blue', s.name)).length;
+                tlog('blue', 'ok', `Loaded ${availableDefenseSkills.length} defense skills (Demo enabled: ${enabled}, TBC: ${availableDefenseSkills.length - enabled})`);
+            } catch (e) {
+                const msg = e.name === 'AbortError' ? 'Request timeout' : (e.message || 'Error');
+                grid.innerHTML = `<div class="empty-state"><div class="es-icon">!</div><div>Failed to load skills</div><div class="text-sm mt-2" style="color:var(--red-bright)">${esc(msg)}</div></div>`;
+                tlog('blue', 'err', `Failed to load defense skills: ${msg}`);
+            } finally {
+                _blueSkillsLoading = null;
             }
-            _renderBlueSkills();
-            document.getElementById('activeDefenseSkills').textContent = availableDefenseSkills.length;
-            document.getElementById('blueSkillCount').textContent = availableDefenseSkills.length;
-            tlog('blue', 'ok', `Loaded ${availableDefenseSkills.length} defense skills`);
-        } catch (e) {
-            const msg = e.name === 'AbortError' ? 'Request timeout' : (e.message || 'Error');
-            grid.innerHTML = `<div class="empty-state"><div class="es-icon">!</div><div>Failed to load skills</div><div class="text-sm mt-2" style="color:var(--red-bright)">${esc(msg)}</div></div>`;
-            tlog('blue', 'err', `Failed to load defense skills: ${msg}`);
-        }
+        })();
+
+        return _blueSkillsLoading;
     }
 
     function _renderBlueSkills() {
         const grid = document.getElementById('defenseSkillGrid');
-        grid.innerHTML = availableDefenseSkills.map(s => `
-            <button class="skill-btn sk-blue" data-skill="${s.name}" onclick="selectDefenseSkill('${s.name}')">
-                <div class="sk-name">${esc(s.display_name || s.name)}</div>
-                <div class="sk-desc">${esc(s.description || '')}</div>
-                <div class="sk-meta sev-${s.alert_level || 'info'}">${esc(s.alert_level || 'info')}</div>
-            </button>
-        `).join('');
+        grid.innerHTML = availableDefenseSkills.map(s => {
+            const name = s.name;
+            const enabled = _isSkillEnabled('blue', name);
+            const pill = enabled ? '<span class="sk-pill pill-demo">DEMO</span>' : '<span class="sk-pill pill-tbc">TBC</span>';
+            const title = enabled
+                ? 'Demo-enabled skill'
+                : 'Hackathon demo: this skill is shown for roadmap, but not executable yet.';
+            return `
+                <button type="button" class="skill-btn sk-blue" data-skill="${esc(name)}" ${enabled ? '' : 'disabled'} title="${esc(title)}">
+                    <div class="sk-name">${esc(s.display_name || name)}</div>
+                    <div class="sk-desc">${esc(s.description || '')}</div>
+                    <div class="sk-foot">
+                        <div class="sk-meta sev-${esc(s.alert_level || 'info')}">${esc(s.alert_level || 'info')}</div>
+                        ${pill}
+                    </div>
+                </button>
+            `;
+        }).join('');
     }
 
     function selectDefenseSkill(name) {
+        if (!_isSkillEnabled('blue', name)) {
+            tlog('blue', 'warn', `To be continued: '${name}' is not enabled in Hackathon demo mode.`);
+            return;
+        }
         selectedDefenseSkill = name;
         document.querySelectorAll('#defenseSkillGrid .skill-btn').forEach(b => b.classList.toggle('active', b.dataset.skill === name));
         tlog('blue', 'info', `Selected: ${name}`);
@@ -2569,6 +2780,10 @@
             if (!checkTargetUrl('targetUrl', 'red')) return;
         }
         if (mode === 'scenario' && !selectedSkill) { tlog('red', 'err', 'Please select a security check skill'); return; }
+        if (mode === 'scenario' && selectedSkill && !_isSkillEnabled('red', selectedSkill)) {
+            tlog('red', 'warn', `To be continued: '${selectedSkill}' is not executable in Hackathon demo mode.`);
+            return;
+        }
 
         let executionApproval = null;
         if (mode === 'scenario') {
@@ -2787,6 +3002,10 @@
         const mode = document.getElementById('defenseMode').value;
         if (!payload && mode !== 'full') { tlog('blue', 'err', 'Enter a payload to scan'); return; }
         if (mode === 'skill' && !selectedDefenseSkill) { tlog('blue', 'err', 'Please select a defense skill'); return; }
+        if (mode === 'skill' && selectedDefenseSkill && !_isSkillEnabled('blue', selectedDefenseSkill)) {
+            tlog('blue', 'warn', `To be continued: '${selectedDefenseSkill}' is not executable in Hackathon demo mode.`);
+            return;
+        }
 
         isDefenseRunning = true;
         const btn = document.getElementById('runDefenseBtn');
@@ -3221,7 +3440,12 @@
                 const skills = team === 'red' ? availableSkills : availableDefenseSkills;
                 if (skills.length === 0) { tlog(team, 'warn', 'No skills loaded yet. Navigate to the tab first.'); break; }
                 tlog(team, 'info', 'Available skills:');
-                skills.forEach(s => tlog(team, 'info', `  - ${s.display_name || s.name || s.skill_name} (${s.severity || s.alert_level || s.category})`));
+                skills.forEach(s => {
+                    const name = team === 'red' ? (s.skill_name || s.name || s.scenario_id) : (s.name || s.skill_name || s.scenario_id);
+                    const enabled = _isSkillEnabled(team === 'red' ? 'red' : 'blue', name);
+                    const tag = HACKATHON_DEMO_MODE ? (enabled ? 'DEMO' : 'TBC') : 'LIVE';
+                    tlog(team, 'info', `  - [${tag}] ${s.display_name || name} (${s.severity || s.alert_level || s.category})`);
+                });
                 break;
             case 'attack':
                 if (team === 'red' && parts[1]) { selectedSkill = parts[1]; document.getElementById('attackMode').value = 'scenario'; runAttack(); }
@@ -3286,6 +3510,9 @@
     // ==================================================================
     // Initialize
     // ==================================================================
+    _attachSkillGridClickHandlers();
+    _applyDemoNotes();
+    _applyHackathonModeControls();
     checkHealth();
     fetchStats();
     fetchEvents();
@@ -3295,6 +3522,13 @@
     attachUrlValidator('purpleTargetUrl');
     // Ensure correct visibility on first render.
     try { updateRedControlsForMode(document.getElementById('attackMode').value); } catch {}
+    // If hackathon mode forces Blue Team to "skill", load the skill list immediately.
+    try {
+        if (HACKATHON_DEMO_MODE && document.getElementById('defenseMode')?.value === 'skill') {
+            document.getElementById('defenseSkillSelector').style.display = 'block';
+            loadDefenseSkills();
+        }
+    } catch {}
     setInterval(checkHealth, 30000);
     </script>
 </body>

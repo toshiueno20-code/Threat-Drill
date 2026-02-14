@@ -76,6 +76,13 @@ class GatekeeperSettings(BaseSettings):
     max_request_size_mb: int = Field(default=10)
     rate_limit_per_minute: int = Field(default=1000)
 
+    # Hackathon / Demo
+    hackathon_demo_mode: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("HACKATHON_DEMO_MODE", "DEMO_MODE"),
+        description="If true, only a curated subset of skills is executable; others are roadmap-only.",
+    )
+
     # Logging
     log_level: str = Field(default="INFO")
     json_logs: bool = Field(default=True)

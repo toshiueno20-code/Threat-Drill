@@ -27,6 +27,15 @@ router = APIRouter()
 _OWASP_WEB_RE = re.compile(r"^owasp_a(\d{2})_(.+)$")
 _OWASP_LLM_RE = re.compile(r"^owasp_llm(\d{2})_(.+)$")
 
+# Hackathon demo: allow execution only for a small curated set of GenAI app checks.
+_HACKATHON_EXECUTABLE_SKILLS = {
+    "owasp_llm01_prompt_injection",
+    "owasp_llm02_sensitive_disclosure",
+    "owasp_llm05_improper_output",
+    "owasp_llm06_excessive_agency",
+    "owasp_llm07_system_prompt_leakage",
+}
+
 
 def _build_gemini_client() -> GeminiClient:
     """Build Gemini client with API-key-first configuration."""
@@ -335,6 +344,15 @@ async def run_single_skill(request: SingleSkillRequest) -> dict:
             detail=f"Skill '{request.skill_name}' not found. Available: {registry.names()}",
         )
 
+    if settings.hackathon_demo_mode and request.skill_name not in _HACKATHON_EXECUTABLE_SKILLS:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Skill '{request.skill_name}' is marked To be continued for the hackathon demo. "
+                "Only the curated GenAI app inspection skills are executable in demo mode."
+            ),
+        )
+
     logger.info(
         "Single skill execution approved",
         skill=request.skill_name,
@@ -360,6 +378,11 @@ async def run_single_skill(request: SingleSkillRequest) -> dict:
 @router.post("/attack/dynamic/checks")
 async def execute_dynamic_checks(request: DynamicChecksExecutionRequest) -> dict:
     """Execute approved read-only dynamic checks in a browser session."""
+    if settings.hackathon_demo_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="Dynamic checks execution is To be continued in hackathon demo mode.",
+        )
     try:
         validate_target_url(request.target_url)
     except TargetNotAllowedError as exc:
