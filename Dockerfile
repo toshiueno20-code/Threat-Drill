@@ -49,5 +49,6 @@ USER threatdrill
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import os, urllib.request; port=os.environ.get('PORT','8080'); urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=5).read()"
 
-# Cloud Run sets $PORT; keep workers configurable for memory-sensitive Playwright runs.
-CMD ["sh", "-c", "uvicorn gatekeeper.app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers ${WEB_CONCURRENCY:-1}"]
+# Cloud Run sets PORT=8080 by default. Use exec-form so uvicorn is PID 1 (better signal handling on Cloud Run).
+# If you need multi-worker, set it explicitly here (Playwright-heavy workloads are usually happier with 1 worker).
+CMD ["uvicorn", "gatekeeper.app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
