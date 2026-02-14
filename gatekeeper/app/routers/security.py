@@ -1,26 +1,33 @@
-"""Security analysis endpoints."""
+"""Security analysis endpoints.
 
+This router provides:
+- `/analyze`: lightweight threat analysis (currently a deterministic mock).
+- `/events`: in-memory event list for UI visibility and troubleshooting.
+"""
+
+from __future__ import annotations
+
+import os
 import uuid
+from collections import deque
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
-from shared.schemas import (
-    MultimodalInput,
-    ThreatAnalysisResult,
-    SecurityEvent,
-    ThreatLevel,
-)
+from shared.schemas import MultimodalInput, SecurityEvent, ThreatAnalysisResult, ThreatLevel
 from shared.utils import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()
 
+_EVENT_BUFFER_SIZE = int(os.environ.get("SECURITY_EVENTS_BUFFER", "200"))
+_EVENTS: "deque[SecurityEvent]" = deque(maxlen=max(10, min(_EVENT_BUFFER_SIZE, 2000)))
+
 
 class SecurityAnalysisRequest(BaseModel):
-    """セキュリティ分析リクエスト."""
+    """Request payload for a single security analysis call."""
 
     inputs: List[MultimodalInput]
     user_id: str | None = None
@@ -31,7 +38,7 @@ class SecurityAnalysisRequest(BaseModel):
 
 
 class SecurityAnalysisResponse(BaseModel):
-    """セキュリティ分析レスポンス."""
+    """Response payload for a single security analysis call."""
 
     event_id: str
     threat_analysis: ThreatAnalysisResult
@@ -45,10 +52,10 @@ async def analyze_security(
     request: SecurityAnalysisRequest,
     background_tasks: BackgroundTasks,
 ) -> SecurityAnalysisResponse:
-    """
-    マルチモーダル入力のセキュリティ分析.
+    """Analyze multimodal inputs for suspicious patterns.
 
-    Gemini 3 Flashで高速スキャンし、疑わしい場合はDeep Thinkモードを起動。
+    Note: this endpoint currently returns a deterministic mock response and stores
+    a `SecurityEvent` in an in-memory ring buffer.
     """
     event_id = str(uuid.uuid4())
 
@@ -60,23 +67,20 @@ async def analyze_security(
     )
 
     try:
-        # TODO: 実際のGemini 3統合（次のステップで実装）
-        # 現在はモックレスポンスを返す
         threat_analysis = ThreatAnalysisResult(
             threat_level=ThreatLevel.SAFE,
             confidence=0.95,
-            reasoning="初期実装: 実際のGemini 3分析は次のステップで統合します",
+            reasoning="No high-confidence threat indicators were detected (mock analyzer).",
             detected_patterns=[],
             recommended_actions=[],
             deep_think_used=False,
             analysis_duration_ms=50.0,
-            model_version="gemini-3-flash-mock",
-            context_window_tokens=1000,
+            model_version="mock-security-analyzer",
+            context_window_tokens=0,
         )
 
-        blocked = threat_analysis.threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]
+        blocked = threat_analysis.threat_level in (ThreatLevel.HIGH, ThreatLevel.CRITICAL)
 
-        # セキュリティイベントの記録（バックグラウンド）
         background_tasks.add_task(
             _store_security_event,
             event_id,
@@ -93,22 +97,18 @@ async def analyze_security(
             message="Analysis completed successfully" if not blocked else "Threat detected and blocked",
         )
 
-    except Exception as e:
-        logger.error(
-            "Security analysis failed",
-            event_id=event_id,
-            error=str(e),
-        )
+    except Exception as exc:
+        logger.error("Security analysis failed", event_id=event_id, error=str(exc))
         raise HTTPException(status_code=500, detail="Security analysis failed")
 
 
-async def _store_security_event(
+def _store_security_event(
     event_id: str,
     request: SecurityAnalysisRequest,
     threat_analysis: ThreatAnalysisResult,
     blocked: bool,
 ) -> None:
-    """セキュリティイベントの保存（非同期）."""
+    """Store a security event in-memory (ring buffer)."""
     try:
         security_event = SecurityEvent(
             event_id=event_id,
@@ -122,30 +122,30 @@ async def _store_security_event(
             user_agent=request.user_agent,
             context_history=request.context_history,
         )
+        _EVENTS.append(security_event)
+        logger.info("Security event stored", event_id=event_id, threat_level=threat_analysis.threat_level)
+    except Exception as exc:
+        logger.error("Failed to store security event", event_id=event_id, error=str(exc))
 
-        # TODO: Firestoreへの保存とPub/Subへのパブリッシュ
-        logger.info(
-            "Security event stored",
-            event_id=event_id,
-            threat_level=threat_analysis.threat_level,
-        )
 
-    except Exception as e:
-        logger.error(
-            "Failed to store security event",
-            event_id=event_id,
-            error=str(e),
-        )
+@router.get("/events", response_model=list[SecurityEvent])
+async def list_security_events(limit: int = 50) -> list[SecurityEvent]:
+    """List recent security events from the in-memory buffer."""
+    safe_limit = max(1, min(int(limit or 50), len(_EVENTS) if _EVENTS else 200))
+    return list(_EVENTS)[-safe_limit:]
 
 
 @router.get("/events/{event_id}", response_model=SecurityEvent)
 async def get_security_event(event_id: str) -> SecurityEvent:
-    """セキュリティイベントの取得."""
-    # TODO: Firestoreから取得
+    """Get a specific security event by ID from the in-memory buffer."""
+    for ev in reversed(_EVENTS):
+        if ev.event_id == event_id:
+            return ev
     raise HTTPException(status_code=404, detail="Event not found")
 
 
 @router.get("/health")
 async def security_health() -> dict[str, str]:
-    """セキュリティモジュールのヘルスチェック."""
+    """Health check for the security module."""
     return {"status": "healthy", "module": "security"}
+

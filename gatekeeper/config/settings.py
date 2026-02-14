@@ -1,8 +1,10 @@
 """Configuration settings for Gatekeeper."""
 
+from __future__ import annotations
+
 from typing import Optional
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,13 +15,44 @@ class GatekeeperSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
-    # Google Cloud Settings
-    gcp_project_id: str = Field(description="Google Cloud Project ID")
-    gcp_location: str = Field(default="us-central1", description="Google Cloud Region")
+    # Google Cloud Settings (optional with API-key mode)
+    gcp_project_id: Optional[str] = Field(default=None, description="Google Cloud Project ID")
+    gcp_location: str = Field(default="us-central1", description="Google Cloud region")
 
-    # Vertex AI Settings
+    # Gemini API (Google AI Studio)
+    api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("API_KEY", "GEMINI_API_KEY"),
+        description="Google AI Studio API key",
+    )
+    gemini_api_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        description="Gemini REST API base URL",
+    )
+    gemini_flash_model: str = Field(default="gemini-2.5-flash", description="Flash model id")
+    gemini_deep_model: str = Field(default="gemini-2.5-pro", description="Deep analysis model id")
+    gemini_embed_model: str = Field(default="text-embedding-004", description="Embedding model id")
+    enable_gemini_playwright_mcp: bool = Field(
+        default=False,
+        description="Enable Gemini SDK + Playwright MCP planning path",
+    )
+    playwright_mcp_command: str = Field(
+        default="npx",
+        description="Command used to launch Playwright MCP server",
+    )
+    playwright_mcp_args: str = Field(
+        default="@playwright/mcp@latest --headless --isolated --output-dir .playwright-mcp",
+        description="Arguments passed to Playwright MCP command",
+    )
+    gemini_mcp_max_remote_calls: int = Field(
+        default=8,
+        description="Maximum automatic MCP tool calls during Gemini planning",
+    )
+
+    # Backward-compatible Vertex field
     vertex_ai_endpoint: Optional[str] = None
 
     # Firestore Settings
@@ -42,6 +75,13 @@ class GatekeeperSettings(BaseSettings):
     deep_think_confidence_threshold: float = Field(default=0.75)
     max_request_size_mb: int = Field(default=10)
     rate_limit_per_minute: int = Field(default=1000)
+
+    # Hackathon / Demo
+    hackathon_demo_mode: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("HACKATHON_DEMO_MODE", "DEMO_MODE"),
+        description="If true, only a curated subset of skills is executable; others are roadmap-only.",
+    )
 
     # Logging
     log_level: str = Field(default="INFO")
