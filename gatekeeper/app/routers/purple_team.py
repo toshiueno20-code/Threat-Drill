@@ -21,11 +21,29 @@ from shared.utils.target_allowlist import TargetNotAllowedError, validate_target
 logger = get_logger(__name__)
 router = APIRouter()
 
+# Hackathon demo: show all skills, but only plan for a curated set (same as Red Team demo mode).
+_HACKATHON_EXECUTABLE_SKILLS_ORDERED = [
+    "owasp_llm01_prompt_injection",
+    "owasp_llm02_sensitive_disclosure",
+    "owasp_llm05_improper_output",
+    "owasp_llm06_excessive_agency",
+    "owasp_llm07_system_prompt_leakage",
+]
+
 
 class PurpleTeamExerciseRequest(BaseModel):
     target_url: str = Field(default="http://localhost:8080", description="Red Team target URL")
     test_payload: str = Field(default="", description="Blue Team test payload")
     run_red_team: bool = Field(default=False, description="Include Red Team planning phase")
+    # Optional: if provided and approved, execute read-only dynamic checks after planning.
+    execution_approval: dict | None = Field(
+        default=None,
+        description="Optional approval payload to execute read-only Red Team checks during the exercise.",
+    )
+    browser_automation_approval: dict | None = Field(
+        default=None,
+        description="Optional approval payload to allow Playwright browser automation for executing Red Team checks.",
+    )
 
 
 class ValidationRequest(BaseModel):
@@ -69,8 +87,49 @@ async def run_exercise(request: PurpleTeamExerciseRequest) -> dict:
     if request.run_red_team:
         try:
             orchestrator = AttackOrchestrator(_build_gemini_client())
-            report = await orchestrator.run_dynamic_assessment(request.target_url)
-            red_team_report = report.model_dump()
+            plan_report = await orchestrator.run_dynamic_assessment(
+                request.target_url,
+                allowed_checks=_HACKATHON_EXECUTABLE_SKILLS_ORDERED if settings.hackathon_demo_mode else None,
+            )
+
+            # If explicit approvals are present, execute the planned checks (read-only) in the same exercise.
+            approved = False
+            approved_by = ""
+            try:
+                ap = request.execution_approval or {}
+                approved = bool(ap.get("approved"))
+                approved_by = str(ap.get("approved_by") or "").strip()
+            except Exception:
+                approved = False
+                approved_by = ""
+
+            browser_ok = False
+            try:
+                bp = request.browser_automation_approval or {}
+                browser_ok = bool(bp.get("approved")) and str(bp.get("approved_by") or "").strip()
+            except Exception:
+                browser_ok = False
+
+            if approved and approved_by and browser_ok:
+                plan = plan_report.vulnerability_check_plan or plan_report.attack_plan
+                planned_order = list(getattr(plan, "priority_order", []) or [])
+                # Safety: if plan is missing, fall back to curated demo list when in hackathon mode.
+                if not planned_order and settings.hackathon_demo_mode:
+                    planned_order = list(_HACKATHON_EXECUTABLE_SKILLS_ORDERED)
+
+                exec_report = await orchestrator.run_dynamic_checks(
+                    request.target_url,
+                    selected_checks=planned_order or None,
+                    allow_browser_automation=True,
+                    approved_by=approved_by,
+                )
+                # Attach the plan to the execution report so UI can show planned vs executed.
+                exec_report.vulnerability_check_plan = plan
+                exec_report.sync_legacy_fields()
+                red_team_report = exec_report.model_dump()
+            else:
+                red_team_report = plan_report.model_dump()
+
             results["red_team"] = red_team_report
         except Exception as exc:
             logger.error("Red Team phase failed", error=str(exc))

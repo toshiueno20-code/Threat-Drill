@@ -660,6 +660,7 @@ class AttackOrchestrator:
         allow_browser_automation: bool = False,
         allow_mcp_tools: bool = False,
         approved_by: str = "",
+        allowed_checks: list[str] | None = None,
     ) -> RedTeamReport:
         """Build recon + vulnerability check plan without executing skills."""
         report = RedTeamReport(target_url=target_url)
@@ -685,6 +686,7 @@ class AttackOrchestrator:
             allow_mcp_tools=allow_mcp_tools,
             approved_by=approved_by,
             metadata_out=report.assessment_metadata,
+            allowed_checks=allowed_checks,
         )
         report.vulnerability_check_plan = plan
         report.sync_legacy_fields()
@@ -709,6 +711,7 @@ class AttackOrchestrator:
         allow_browser_automation: bool = False,
         allow_mcp_tools: bool = False,
         approved_by: str = "",
+        allowed_checks: list[str] | None = None,
     ) -> dict[str, Any]:
         """Run static scan and dynamic assessment planning in one call."""
         combined: dict[str, Any] = {
@@ -735,6 +738,7 @@ class AttackOrchestrator:
                 allow_browser_automation=allow_browser_automation,
                 allow_mcp_tools=allow_mcp_tools,
                 approved_by=approved_by,
+                allowed_checks=allowed_checks,
             )
             combined["dynamic"] = report.model_dump()
         except Exception as exc:
@@ -752,6 +756,7 @@ class AttackOrchestrator:
         allow_browser_automation: bool = False,
         allow_mcp_tools: bool = False,
         approved_by: str = "",
+        allowed_checks: list[str] | None = None,
     ) -> RedTeamReport:
         """Build dynamic assessment plan with optional static analysis context."""
         report = RedTeamReport(target_url=target_url)
@@ -777,6 +782,7 @@ class AttackOrchestrator:
             allow_mcp_tools=allow_mcp_tools,
             approved_by=approved_by,
             metadata_out=report.assessment_metadata,
+            allowed_checks=allowed_checks,
         )
         report.vulnerability_check_plan = plan
         report.sync_legacy_fields()
@@ -868,9 +874,16 @@ class AttackOrchestrator:
         allow_mcp_tools: bool = False,
         approved_by: str = "",
         metadata_out: dict[str, Any] | None = None,
+        allowed_checks: list[str] | None = None,
     ) -> VulnerabilityCheckPlan:
         """Generate a prioritized read-only vulnerability check plan."""
         available = get_registry().names()
+        if allowed_checks:
+            available_set = set(available)
+            # Preserve caller order so demo-mode output stays stable.
+            filtered = [name for name in allowed_checks if name in available_set]
+            if filtered:
+                available = filtered
 
         static_context = ""
         if static_findings:
@@ -895,10 +908,16 @@ class AttackOrchestrator:
             selected = _normalise_plan_names(mcp_plan.get("selected_checks"), available)
             priority = _normalise_plan_names(mcp_plan.get("priority_order"), available)
 
-            if not selected:
+            if allowed_checks:
+                # Demo-mode: always plan for the full curated set for consistency.
                 selected = list(available)
-            if not priority:
-                priority = list(selected)
+                if not priority:
+                    priority = list(available)
+            else:
+                if not selected:
+                    selected = list(available)
+                if not priority:
+                    priority = list(selected)
 
             for name in selected:
                 if name not in priority:
@@ -959,10 +978,16 @@ class AttackOrchestrator:
         selected = _normalise_plan_names(parsed.get("selected_checks"), available)
         priority = _normalise_plan_names(parsed.get("priority_order"), available)
 
-        if not selected:
+        if allowed_checks:
+            # Demo-mode: always plan for the full curated set for consistency.
             selected = list(available)
-        if not priority:
-            priority = list(selected)
+            if not priority:
+                priority = list(available)
+        else:
+            if not selected:
+                selected = list(available)
+            if not priority:
+                priority = list(selected)
 
         # Ensure priority includes all selected checks.
         for name in selected:

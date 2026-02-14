@@ -27,14 +27,15 @@ router = APIRouter()
 _OWASP_WEB_RE = re.compile(r"^owasp_a(\d{2})_(.+)$")
 _OWASP_LLM_RE = re.compile(r"^owasp_llm(\d{2})_(.+)$")
 
-# Hackathon demo: allow execution only for a small curated set of GenAI app checks.
-_HACKATHON_EXECUTABLE_SKILLS = {
+# Hackathon demo: show all skills, but only a curated set is executable/planned.
+_HACKATHON_EXECUTABLE_SKILLS_ORDERED = [
     "owasp_llm01_prompt_injection",
     "owasp_llm02_sensitive_disclosure",
     "owasp_llm05_improper_output",
     "owasp_llm06_excessive_agency",
     "owasp_llm07_system_prompt_leakage",
-}
+]
+_HACKATHON_EXECUTABLE_SKILLS = set(_HACKATHON_EXECUTABLE_SKILLS_ORDERED)
 
 
 def _build_gemini_client() -> GeminiClient:
@@ -244,6 +245,7 @@ async def dynamic_attack(request: DynamicAttackRequest) -> dict:
             allow_browser_automation=allow_browser_automation,
             allow_mcp_tools=allow_mcp_tools,
             approved_by=approved_by or "",
+            allowed_checks=_HACKATHON_EXECUTABLE_SKILLS_ORDERED if settings.hackathon_demo_mode else None,
         )
         return {"status": "completed", "report": report.model_dump()}
     except SandboxVerificationError as exc:
@@ -290,6 +292,7 @@ async def full_red_team(request: FullRedTeamRequest) -> dict:
             allow_browser_automation=allow_browser_automation,
             allow_mcp_tools=allow_mcp_tools,
             approved_by=approved_by or "",
+            allowed_checks=_HACKATHON_EXECUTABLE_SKILLS_ORDERED if settings.hackathon_demo_mode else None,
         )
         return {"status": "completed", "result": result}
     except SandboxVerificationError as exc:
@@ -378,11 +381,6 @@ async def run_single_skill(request: SingleSkillRequest) -> dict:
 @router.post("/attack/dynamic/checks")
 async def execute_dynamic_checks(request: DynamicChecksExecutionRequest) -> dict:
     """Execute approved read-only dynamic checks in a browser session."""
-    if settings.hackathon_demo_mode:
-        raise HTTPException(
-            status_code=403,
-            detail="Dynamic checks execution is To be continued in hackathon demo mode.",
-        )
     try:
         validate_target_url(request.target_url)
     except TargetNotAllowedError as exc:
@@ -391,18 +389,27 @@ async def execute_dynamic_checks(request: DynamicChecksExecutionRequest) -> dict
     approval = _require_execution_approval(request.execution_approval)
     _require_browser_automation_approval(request.browser_automation_approval, purpose="playwright_dynamic_checks")
 
+    selected_checks = request.selected_checks
+    if settings.hackathon_demo_mode:
+        # Demo policy: allow executing dynamic checks, but only for curated GenAI app checks.
+        if selected_checks:
+            filtered = [name for name in selected_checks if name in _HACKATHON_EXECUTABLE_SKILLS]
+            selected_checks = filtered or list(_HACKATHON_EXECUTABLE_SKILLS_ORDERED)
+        else:
+            selected_checks = list(_HACKATHON_EXECUTABLE_SKILLS_ORDERED)
+
     logger.info(
         "Dynamic checks execution approved",
         target=request.target_url,
         approved_by=approval.approved_by,
-        selected_checks=len(request.selected_checks or []),
+        selected_checks=len(selected_checks or []),
     )
 
     orchestrator = AttackOrchestrator(_build_gemini_client())
     try:
         report = await orchestrator.run_dynamic_checks(
             request.target_url,
-            selected_checks=request.selected_checks,
+            selected_checks=selected_checks,
             allow_browser_automation=True,
             approved_by=approval.approved_by,
         )
