@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Poetry
-RUN pip install poetry==1.7.1
+# Poetry (match poetry.lock / pyproject.toml features like `package-mode`)
+RUN pip install poetry==2.3.2
 
 # Install dependencies first for better Docker layer caching
 COPY pyproject.toml poetry.lock* ./
