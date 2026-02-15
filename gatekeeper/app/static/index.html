@@ -2106,6 +2106,16 @@
         finally { clearTimeout(t); }
     }
 
+    async function readJsonMaybe(r) {
+        const ct = String(r.headers.get('content-type') || '').toLowerCase();
+        const text = await r.text().catch(() => '');
+        let data = null;
+        if (ct.includes('application/json')) {
+            try { data = JSON.parse(text || 'null'); } catch {}
+        }
+        return { contentType: ct, text, data };
+    }
+
     function _uuid() {
         try { return crypto.randomUUID(); } catch { return `run_${Date.now()}_${Math.random().toString(16).slice(2)}`; }
     }
@@ -2458,8 +2468,10 @@
     async function checkHealth() {
         const el = document.getElementById('systemStatus');
         try {
-            const r = await fetch('/health');
-            const d = await r.json();
+            const r = await api('/health', { method: 'GET' });
+            const { data: d, text } = await readJsonMaybe(r);
+            if (!r.ok) throw new Error(`HTTP ${r.status}: ${text || 'Health check failed'}`);
+            if (!d) throw new Error(`HTTP ${r.status}: Invalid JSON response`);
             el.innerHTML = d.status === 'healthy'
                 ? '<div class="pulse-dot"></div><span>System Online</span>'
                 : '<div class="pulse-dot offline"></div><span>System Error</span>';
@@ -2501,27 +2513,26 @@
     async function fetchEvents() {
         const tbody = document.getElementById('eventsBody');
         try {
-            const r = await fetch('/api/v1/security/events');
-            if (r.ok) {
-                const d = await r.json();
-                securityEvents = Array.isArray(d) ? d : (d.events || []);
-                if (securityEvents.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon" data-ico="inbox"></div><div>No security events yet</div></td></tr>';
-                    return;
-                }
-                stats.totalRequests = securityEvents.length;
-                stats.threatsBlocked = securityEvents.filter(e => e.blocked).length;
-                tbody.innerHTML = securityEvents.slice(0, 10).map(e => `
-                    <tr>
-                        <td class="font-mono text-xs">${new Date(e.timestamp).toLocaleTimeString()}</td>
-                        <td>${esc(e.type || 'SecurityAnalysis')}</td>
-                        <td><span class="threat-pill threat-${(e.threat_analysis && e.threat_analysis.threat_level) ? e.threat_analysis.threat_level : 'safe'}">${esc((e.threat_analysis && e.threat_analysis.threat_level) ? e.threat_analysis.threat_level : 'safe')}</span></td>
-                        <td class="font-mono text-xs">${esc(e.source_ip || '--')}</td>
-                    </tr>
-                `).join('');
-                document.getElementById('totalRequests').textContent = stats.totalRequests;
-                document.getElementById('threatsBlocked').textContent = stats.threatsBlocked;
+            const r = await api('/api/v1/security/events', { method: 'GET' });
+            if (!r.ok) return;
+            const { data: d } = await readJsonMaybe(r);
+            securityEvents = Array.isArray(d) ? d : (d?.events || []);
+            if (securityEvents.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon" data-ico="inbox"></div><div>No security events yet</div></td></tr>';
+                return;
             }
+            stats.totalRequests = securityEvents.length;
+            stats.threatsBlocked = securityEvents.filter(e => e.blocked).length;
+            tbody.innerHTML = securityEvents.slice(0, 10).map(e => `
+                <tr>
+                    <td class="font-mono text-xs">${new Date(e.timestamp).toLocaleTimeString()}</td>
+                    <td>${esc(e.type || 'SecurityAnalysis')}</td>
+                    <td><span class="threat-pill threat-${(e.threat_analysis && e.threat_analysis.threat_level) ? e.threat_analysis.threat_level : 'safe'}">${esc((e.threat_analysis && e.threat_analysis.threat_level) ? e.threat_analysis.threat_level : 'safe')}</span></td>
+                    <td class="font-mono text-xs">${esc(e.source_ip || '--')}</td>
+                </tr>
+            `).join('');
+            document.getElementById('totalRequests').textContent = stats.totalRequests;
+            document.getElementById('threatsBlocked').textContent = stats.threatsBlocked;
         } catch {
             tbody.innerHTML = '<tr><td colspan="4" class="empty-state"><div class="es-icon" data-ico="inbox"></div><div>No security events yet</div></td></tr>';
         }
@@ -2945,9 +2956,13 @@
         tlog('red', 'info', startMessages[mode] || 'Running assessment...');
 
         try {
-            const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-            const data = await r.json();
-            if (!r.ok) throw new Error(data.detail || 'Request failed');
+            const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120000);
+            const { data, text } = await readJsonMaybe(r);
+            if (!r.ok) {
+                const msg = (data && (data.detail || data.error || data.message)) || text || 'Request failed';
+                throw new Error(`HTTP ${r.status}: ${msg}`);
+            }
+            if (!data) throw new Error(`HTTP ${r.status}: Invalid JSON response`);
             tlog('red', 'ok', doneMessages[mode] || 'Assessment completed successfully');
             const payload = data.result || data.report || data;
             // Keep a small amount of state so users can run planned checks next.
@@ -3035,9 +3050,13 @@
         tlog('blue', 'info', 'Initializing defense scan...');
 
         try {
-            const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-            const data = await r.json();
-            if (!r.ok) throw new Error(data.detail || 'Defense scan failed');
+            const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120000);
+            const { data, text } = await readJsonMaybe(r);
+            if (!r.ok) {
+                const msg = (data && (data.detail || data.error || data.message)) || text || 'Defense scan failed';
+                throw new Error(`HTTP ${r.status}: ${msg}`);
+            }
+            if (!data) throw new Error(`HTTP ${r.status}: Invalid JSON response`);
             tlog('blue', 'ok', 'Defense scan completed');
             const payloadOut = data.result || data.report || data;
             displayDefenseResult(payloadOut);
@@ -3106,7 +3125,7 @@
         tlog('purple', 'info', 'Blue Team defense phase will follow...');
 
         try {
-            const r = await fetch('/api/v1/purple-team/exercise', {
+            const r = await api('/api/v1/purple-team/exercise', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -3116,9 +3135,13 @@
                     execution_approval: redExecApproval,
                     browser_automation_approval: redBrowserApproval,
                 })
-            });
-            const data = await r.json();
-            if (!r.ok) throw new Error(data.detail || 'Exercise failed');
+            }, 180000);
+            const { data, text } = await readJsonMaybe(r);
+            if (!r.ok) {
+                const msg = (data && (data.detail || data.error || data.message)) || text || 'Exercise failed';
+                throw new Error(`HTTP ${r.status}: ${msg}`);
+            }
+            if (!data) throw new Error(`HTTP ${r.status}: Invalid JSON response`);
 
             const result = data.result || data;
             tlog('purple', 'ok', 'Exercise completed');

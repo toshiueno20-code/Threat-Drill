@@ -16,7 +16,7 @@ import shlex
 import uuid
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import Any, TypeVar, TYPE_CHECKING
 from collections.abc import Awaitable, Callable
 from urllib.parse import urlparse
 
@@ -26,12 +26,14 @@ from pydantic import BaseModel, Field
 from shared.schemas import ThreatLevel
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
-from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 from red_teaming.skills import ReconData, SkillResult, get_registry
 
 logger = get_logger(__name__)
 
 T = TypeVar("T")
+
+if TYPE_CHECKING:
+    from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 
 
 class VulnerabilityCheckPlan(BaseModel):
@@ -331,6 +333,7 @@ class AttackOrchestrator:
             return await self._run_recon_http_fallback(target_url)
 
         async def _run() -> ReconData:
+            from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
             server = PlaywrightMCPServer(headless=True)
             tool_calls: list[dict[str, Any]] = []
             try:
@@ -590,6 +593,7 @@ class AttackOrchestrator:
 
         async def _run() -> RedTeamReport:
             # Single browser session for all checks for consistent evidence + speed.
+            from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
             server = PlaywrightMCPServer(headless=True)
             tool_calls: list[dict[str, Any]] = []
             try:
@@ -795,7 +799,7 @@ class AttackOrchestrator:
 
     async def _run_recon(
         self,
-        server: PlaywrightMCPServer,
+        server: "PlaywrightMCPServer",
         target_url: str,
         *,
         tool_calls_out: list[dict[str, Any]] | None = None,

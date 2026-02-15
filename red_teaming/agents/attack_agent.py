@@ -18,7 +18,6 @@ from shared.schemas import ThreatLevel
 from shared.constants import RED_TEAM_MAX_CONCURRENT_ATTACKS
 from shared.utils import get_logger
 from intelligence_center.models import GeminiClient
-from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 from red_teaming.skills import SkillResult, get_registry
 from red_teaming.orchestrator.attack_orchestrator import AttackOrchestrator
 
@@ -69,6 +68,8 @@ class RedTeamAgent:
                 severity=ThreatLevel.LOW,
                 error=f"Unknown skill: {skill_name}. Available: {self.registry.names()}",
             )
+
+        from red_teaming.mcp_server.playwright_mcp import PlaywrightMCPServer
 
         server = PlaywrightMCPServer(headless=True)
         await server.start()
