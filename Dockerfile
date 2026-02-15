@@ -14,7 +14,7 @@ ENV PYTHONUNBUFFERED=1 \
 # - build tools for wheels (uvicorn[standard] deps, etc.)
 # - git is required by GitPython (used by static_analyzer) to clone repositories at runtime
 # - curl/ca-certificates used by build steps and healthcheck
-# - nodejs/npm is used when enabling the optional Gemini Playwright MCP path (npx @playwright/mcp@latest)
+# - nodejs/npm is used when enabling the optional Gemini Playwright MCP path
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -24,6 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Playwright MCP CLI at build time so Cloud Run doesn't do slow/fragile `npx` installs per request.
+RUN npm install -g @playwright/mcp@0.0.68 \
+    && npm cache clean --force
 
 # Poetry (match poetry.lock / pyproject.toml features like `package-mode`)
 RUN pip install poetry==2.3.2

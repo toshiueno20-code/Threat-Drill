@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import uuid
 from dataclasses import asdict
 from datetime import datetime
@@ -237,6 +238,22 @@ class AttackOrchestrator:
             settings_args,
         )
         mcp_args = self._parse_mcp_args(mcp_args_raw)
+
+        # If the image has the CLI installed, avoid `npx @playwright/mcp@...` which triggers
+        # slow, flaky runtime installs on Cloud Run.
+        try:
+            if (
+                mcp_command == "npx"
+                and mcp_args
+                and (mcp_args[0].startswith("@playwright/mcp") or mcp_args[0].startswith("playwright-mcp"))
+                and shutil.which("playwright-mcp")
+            ):
+                mcp_command = "playwright-mcp"
+                # Drop the package spec token (e.g. "@playwright/mcp@0.0.68") if present.
+                if mcp_args[0].startswith("@playwright/mcp"):
+                    mcp_args = mcp_args[1:]
+        except Exception:
+            pass
         try:
             max_remote_calls = int(os.environ.get("GEMINI_MCP_MAX_REMOTE_CALLS", str(settings_max_calls)))
         except ValueError:

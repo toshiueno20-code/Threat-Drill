@@ -2956,7 +2956,7 @@
         tlog('red', 'info', startMessages[mode] || 'Running assessment...');
 
         try {
-            const timeoutMs = mode === 'dynamic' ? 300000 : mode === 'dynamic_checks' ? 600000 : mode === 'full' ? 600000 : mode === 'static' ? 600000 : 300000;
+            const timeoutMs = mode === 'dynamic' ? 600000 : mode === 'dynamic_checks' ? 600000 : mode === 'full' ? 600000 : mode === 'static' ? 600000 : 600000;
             const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, timeoutMs);
             const { data, text } = await readJsonMaybe(r);
             if (!r.ok) {
