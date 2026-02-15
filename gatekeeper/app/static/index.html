@@ -2956,7 +2956,8 @@
         tlog('red', 'info', startMessages[mode] || 'Running assessment...');
 
         try {
-            const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120000);
+            const timeoutMs = mode === 'dynamic' ? 300000 : mode === 'dynamic_checks' ? 600000 : mode === 'full' ? 600000 : mode === 'static' ? 600000 : 300000;
+            const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, timeoutMs);
             const { data, text } = await readJsonMaybe(r);
             if (!r.ok) {
                 const msg = (data && (data.detail || data.error || data.message)) || text || 'Request failed';
@@ -3000,7 +3001,10 @@
                 }
             }
         } catch (e) {
-            tlog('red', 'err', `Error: ${e.message}`);
+            const msg = (e && e.name === 'AbortError')
+                ? 'Request timeout: the browser aborted the request. Try again, increase the timeout, or disable Playwright/MCP options.'
+                : (e && e.message ? e.message : String(e || 'Error'));
+            tlog('red', 'err', `Error: ${msg}`);
         } finally {
             isRunning = false;
             btn.disabled = false;
@@ -3050,7 +3054,7 @@
         tlog('blue', 'info', 'Initializing defense scan...');
 
         try {
-            const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 120000);
+            const r = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 300000);
             const { data, text } = await readJsonMaybe(r);
             if (!r.ok) {
                 const msg = (data && (data.detail || data.error || data.message)) || text || 'Defense scan failed';
@@ -3070,7 +3074,10 @@
             } catch {}
             setTimeout(fetchEvents, 1000);
         } catch (e) {
-            tlog('blue', 'err', `Error: ${e.message}`);
+            const msg = (e && e.name === 'AbortError')
+                ? 'Request timeout: the browser aborted the request.'
+                : (e && e.message ? e.message : String(e || 'Error'));
+            tlog('blue', 'err', `Error: ${msg}`);
         } finally {
             isDefenseRunning = false;
             btn.disabled = false;
@@ -3135,7 +3142,7 @@
                     execution_approval: redExecApproval,
                     browser_automation_approval: redBrowserApproval,
                 })
-            }, 180000);
+            }, 600000);
             const { data, text } = await readJsonMaybe(r);
             if (!r.ok) {
                 const msg = (data && (data.detail || data.error || data.message)) || text || 'Exercise failed';
@@ -3205,7 +3212,10 @@
                 });
             } catch {}
         } catch (e) {
-            tlog('purple', 'err', `Error: ${e.message}`);
+            const msg = (e && e.name === 'AbortError')
+                ? 'Request timeout: the browser aborted the request.'
+                : (e && e.message ? e.message : String(e || 'Error'));
+            tlog('purple', 'err', `Error: ${msg}`);
         } finally {
             isPurpleRunning = false;
             btn.disabled = false;
