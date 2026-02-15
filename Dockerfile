@@ -10,24 +10,29 @@ ENV PYTHONUNBUFFERED=1 \
     # Install Playwright browsers into a shared path so a non-root user can run them.
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# Match local dev Node major (npx / Playwright MCP behavior can differ across Node versions).
+ARG NODE_VERSION=20.19.4
+
 # System packages:
 # - build tools for wheels (uvicorn[standard] deps, etc.)
 # - git is required by GitPython (used by static_analyzer) to clone repositories at runtime
 # - curl/ca-certificates used by build steps and healthcheck
-# - nodejs/npm is used when enabling the optional Gemini Playwright MCP path
+# - node is installed separately (see NODE_VERSION) for consistent npx behavior
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     git \
     ca-certificates \
     curl \
-    nodejs \
-    npm \
+    tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Playwright MCP CLI at build time so Cloud Run doesn't do slow/fragile `npx` installs per request.
-RUN npm install -g @playwright/mcp@0.0.68 \
-    && npm cache clean --force
+# Install Node.js (includes npm/npx). Use upstream binaries to avoid distro-specific versions.
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" -o /tmp/node.tgz \
+    && tar -xzf /tmp/node.tgz -C /usr/local --strip-components=1 \
+    && rm -f /tmp/node.tgz \
+    && node --version \
+    && npm --version
 
 # Poetry (match poetry.lock / pyproject.toml features like `package-mode`)
 RUN pip install poetry==2.3.2
