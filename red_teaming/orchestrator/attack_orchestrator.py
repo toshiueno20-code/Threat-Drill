@@ -239,23 +239,37 @@ class AttackOrchestrator:
         )
         mcp_args = self._parse_mcp_args(mcp_args_raw)
 
+        # Be tolerant of misconfiguration like PLAYWRIGHT_MCP_COMMAND="npx --yes".
+        # `StdioServerParameters` expects the executable name in `command` and the rest in `args`.
+        try:
+            cmd_tokens = shlex.split(mcp_command, posix=(os.name != "nt"))
+            if len(cmd_tokens) > 1:
+                mcp_command = cmd_tokens[0]
+                mcp_args = cmd_tokens[1:] + (mcp_args or [])
+        except Exception:
+            pass
+
         # If the image has the CLI installed, avoid `npx @playwright/mcp@...` which triggers
         # slow, flaky runtime installs on Cloud Run.
         try:
+            base = os.path.basename(mcp_command or "")
             # Also guard against misconfiguration where PLAYWRIGHT_MCP_COMMAND=playwright-mcp but
             # PLAYWRIGHT_MCP_ARGS still starts with "@playwright/mcp@...".
-            if mcp_command == "playwright-mcp" and mcp_args and mcp_args[0].startswith("@playwright/mcp"):
+            if base == "playwright-mcp" and mcp_args and mcp_args[0].startswith("@playwright/mcp"):
                 mcp_args = mcp_args[1:]
 
             if (
-                mcp_command == "npx"
+                base == "npx"
                 and mcp_args
                 and (mcp_args[0].startswith("@playwright/mcp") or mcp_args[0].startswith("playwright-mcp"))
                 and shutil.which("playwright-mcp")
             ):
-                mcp_command = "playwright-mcp"
-                # Drop the package spec token (e.g. "@playwright/mcp@0.0.68") if present.
-                if mcp_args[0].startswith("@playwright/mcp"):
+                mcp_command = shutil.which("playwright-mcp") or "playwright-mcp"
+                # Drop the leading token if it is a package spec or an explicit subcommand name.
+                # Examples:
+                # - ["@playwright/mcp@0.0.68", "--headless", ...]
+                # - ["playwright-mcp", "--headless", ...]
+                if mcp_args[0].startswith("@playwright/mcp") or mcp_args[0] == "playwright-mcp":
                     mcp_args = mcp_args[1:]
         except Exception:
             pass

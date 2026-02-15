@@ -7,15 +7,21 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    # Make sure globally-installed npm CLIs are available to the non-root runtime user.
+    PATH=/usr/local/bin:$PATH \
+    # Default to the installed CLI to avoid slow/flaky runtime `npx @playwright/mcp@...` downloads on Cloud Run.
+    PLAYWRIGHT_MCP_COMMAND=playwright-mcp \
+    PLAYWRIGHT_MCP_ARGS="--headless --isolated --output-dir .playwright-mcp"
 
 ARG NODE_VERSION=20.19.4
+ARG PLAYWRIGHT_MCP_VERSION=0.0.68
 
 # System packages:
 # - build tools for wheels (uvicorn[standard] deps, etc.)
 # - git is required by GitPython (used by static_analyzer) to clone repositories at runtime
 # - curl/ca-certificates used by build steps and healthcheck
-# - nodejs/npm is used when enabling the optional Gemini Playwright MCP path (npx @playwright/mcp@latest)
+# - node/npm/npx is used when enabling the optional Gemini Playwright MCP path
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
@@ -30,6 +36,11 @@ RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-l
     && rm -f /tmp/node.tgz \
     && node --version \
     && npm --version
+
+# Avoid slow runtime `npx @playwright/mcp@...` downloads on Cloud Run by installing the MCP CLI at build time.
+RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+    && playwright-mcp --help >/dev/null \
+    && npm cache clean --force
 
 # Poetry (match poetry.lock / pyproject.toml features like `package-mode`)
 RUN pip install poetry==2.3.2

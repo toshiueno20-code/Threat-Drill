@@ -40,11 +40,13 @@ class GatekeeperSettings(BaseSettings):
         description="Enable Gemini SDK + Playwright MCP planning path",
     )
     playwright_mcp_command: str = Field(
-        default="npx",
+        # Prefer the installed CLI (Docker/Cloud Run). For local dev without a global install,
+        # you can set PLAYWRIGHT_MCP_COMMAND=npx and PLAYWRIGHT_MCP_ARGS="@playwright/mcp@<ver> ...".
+        default="playwright-mcp",
         description="Command used to launch Playwright MCP server",
     )
     playwright_mcp_args: str = Field(
-        default="@playwright/mcp@latest --headless --isolated --output-dir .playwright-mcp",
+        default="--headless --isolated --output-dir .playwright-mcp",
         description="Arguments passed to Playwright MCP command",
     )
     gemini_mcp_max_remote_calls: int = Field(
