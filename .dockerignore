@@ -18,6 +18,9 @@ venv/
 
 docs/
 images/
+tests/
+deployment/
+scripts/
 
 Zenn*.md
 README*.md
