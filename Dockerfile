@@ -9,6 +9,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+ARG NODE_VERSION=20.19.4
+
 # System packages:
 # - build tools for wheels (uvicorn[standard] deps, etc.)
 # - git is required by GitPython (used by static_analyzer) to clone repositories at runtime
@@ -20,9 +22,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
     curl \
-    nodejs \
-    npm \
+    tar \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" -o /tmp/node.tgz \
+    && tar -xzf /tmp/node.tgz -C /usr/local --strip-components=1 \
+    && rm -f /tmp/node.tgz \
+    && node --version \
+    && npm --version
 
 # Poetry (match poetry.lock / pyproject.toml features like `package-mode`)
 RUN pip install poetry==2.3.2
