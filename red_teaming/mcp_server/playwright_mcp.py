@@ -387,12 +387,63 @@ async def _select_option(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> st
 
 
 async def _submit_form(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> str:
-    # Locate the form and trigger submit
-    await server._page.evaluate(
-        "sel => document.querySelector(sel).submit()",
-        inp["selector"],
+    import asyncio
+
+    selector = str(inp.get("selector") or "").strip()
+    if not selector:
+        raise ValueError("selector is required (CSS selector for <form>)")
+
+    # Prefer Playwright element resolution so we can return a clearer error than
+    # "Cannot read properties of null" when the selector doesn't match.
+    form = await server._page.query_selector(selector)
+    if not form:
+        try:
+            forms = await server._page.evaluate(
+                """
+                () => Array.from(document.querySelectorAll('form')).slice(0, 6).map((f, i) => ({
+                  index: i,
+                  id: f.id || null,
+                  name: f.getAttribute('name') || null,
+                  action: f.getAttribute('action') || null,
+                  method: (f.getAttribute('method') || 'get').toLowerCase(),
+                }))
+                """
+            )
+        except Exception:
+            forms = []
+        raise RuntimeError(f"Form not found for selector: {selector}. Available forms: {forms}")
+
+    # Use requestSubmit() when possible (fires submit event + respects handlers).
+    # Fallback to clicking a submit control, then raw submit().
+    await form.evaluate(
+        """
+        (f) => {
+          if (!f) return { ok: false, error: 'form is null' };
+          if (typeof f.requestSubmit === 'function') {
+            f.requestSubmit();
+            return { ok: true, method: 'requestSubmit' };
+          }
+          const btn = f.querySelector('button[type=\"submit\"], input[type=\"submit\"], button:not([type])');
+          if (btn) {
+            btn.click();
+            return { ok: true, method: 'click_submit' };
+          }
+          if (typeof f.submit === 'function') {
+            f.submit();
+            return { ok: true, method: 'submit' };
+          }
+          return { ok: false, error: 'no submit method available' };
+        }
+        """
     )
-    return f"Submitted form: {inp['selector']}"
+
+    # Best-effort: if submission triggers navigation, wait a bit; otherwise continue.
+    try:
+        await asyncio.wait_for(server._page.wait_for_load_state("domcontentloaded"), timeout=5.0)
+    except Exception:
+        pass
+
+    return f"Submitted form: {selector}"
 
 
 async def _evaluate_js(server: PlaywrightMCPServer, inp: Dict[str, Any]) -> Any:

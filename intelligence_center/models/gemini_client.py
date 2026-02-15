@@ -216,6 +216,8 @@ class GeminiClient:
         hard_timeout_seconds = int(
             os.environ.get("GEMINI_MCP_HARD_TIMEOUT_SECONDS", str(mcp_timeout_seconds + 45))
         )
+        init_timeout_seconds = int(os.environ.get("GEMINI_MCP_INIT_TIMEOUT_SECONDS", "60"))
+        list_tools_timeout_seconds = int(os.environ.get("GEMINI_MCP_LIST_TOOLS_TIMEOUT_SECONDS", "20"))
 
         try:
             logger.info(
@@ -224,6 +226,8 @@ class GeminiClient:
                 mcp_args_preview=mcp_args[:6],
                 max_remote_calls=max_remote_calls,
                 timeout_s=mcp_timeout_seconds,
+                hard_timeout_s=hard_timeout_seconds,
+                init_timeout_s=init_timeout_seconds,
             )
             async with asyncio.timeout(hard_timeout_seconds):
                 params = StdioServerParameters(command=mcp_command, args=mcp_args)
@@ -231,11 +235,11 @@ class GeminiClient:
                     async with ClientSession(read, write) as session:
                         # Avoid event-loop cancellation blowing up the MCP stdio reader/writer.
                         # Keep init time bounded separately from the model call timeout.
-                        async with asyncio.timeout(20):
+                        async with asyncio.timeout(max(5, min(init_timeout_seconds, hard_timeout_seconds))):
                             await session.initialize()
 
                         try:
-                            async with asyncio.timeout(10):
+                            async with asyncio.timeout(max(3, min(list_tools_timeout_seconds, hard_timeout_seconds))):
                                 listed = await session.list_tools()
                             tools_list = getattr(listed, "tools", []) or []
                             tool_names = [getattr(t, "name", "") for t in tools_list if getattr(t, "name", "")]

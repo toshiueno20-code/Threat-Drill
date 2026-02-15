@@ -242,6 +242,11 @@ class AttackOrchestrator:
         # If the image has the CLI installed, avoid `npx @playwright/mcp@...` which triggers
         # slow, flaky runtime installs on Cloud Run.
         try:
+            # Also guard against misconfiguration where PLAYWRIGHT_MCP_COMMAND=playwright-mcp but
+            # PLAYWRIGHT_MCP_ARGS still starts with "@playwright/mcp@...".
+            if mcp_command == "playwright-mcp" and mcp_args and mcp_args[0].startswith("@playwright/mcp"):
+                mcp_args = mcp_args[1:]
+
             if (
                 mcp_command == "npx"
                 and mcp_args
