@@ -13,6 +13,7 @@ _logger = logging.getLogger(__name__)
 
 from .base import (
     BaseSkill,
+    GeminiLogEntry,
     SkillResult,
     ReconData,
     TimelineEntry,
@@ -47,6 +48,7 @@ _logger.info(f"Skills registered: {len(_registry)} skills loaded")
 
 __all__ = [
     "BaseSkill",
+    "GeminiLogEntry",
     "SkillResult",
     "ReconData",
     "TimelineEntry",

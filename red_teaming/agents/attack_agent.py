@@ -75,7 +75,15 @@ class RedTeamAgent:
         await server.start()
         try:
             await server.call_tool("browser_navigate", {"url": self.target_endpoint})
-            return await skill_instance.execute(server, self.target_endpoint)
+            result = await skill_instance.execute(server, self.target_endpoint)
+            # AI verification: Gemini analyzes the skill result
+            try:
+                result = await self.orchestrator._ai_verify_skill_result(
+                    skill_instance, result, server, self.target_endpoint,
+                )
+            except Exception as ai_exc:
+                logger.warning("AI verification skipped", skill=skill_name, error=str(ai_exc))
+            return result
         except Exception as exc:
             logger.error("Skill execution failed", skill=skill_name, error=str(exc))
             return SkillResult(

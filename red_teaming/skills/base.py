@@ -32,6 +32,19 @@ class TimelineEntry(BaseModel):
     detail: str
 
 
+class GeminiLogEntry(BaseModel):
+    """A single Gemini AI interaction log entry."""
+
+    timestamp: float = Field(default_factory=time.time)
+    phase: str = ""           # e.g. "analysis", "verification", "planning"
+    prompt_summary: str = ""  # truncated prompt sent to Gemini
+    response_text: str = ""   # Gemini raw response text
+    model: str = ""
+    tokens_used: int = 0
+    duration_ms: float = 0.0
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SkillResult(BaseModel):
     """Typed result returned by every skill execution.
 
@@ -43,6 +56,7 @@ class SkillResult(BaseModel):
     severity: ThreatLevel
     evidence: list[str] = Field(default_factory=list)
     timeline: list[TimelineEntry] = Field(default_factory=list)
+    gemini_logs: list[GeminiLogEntry] = Field(default_factory=list)
     duration_ms: float = 0.0
     error: str | None = None
 
@@ -78,6 +92,7 @@ class BaseSkill(ABC):
     skill_name: ClassVar[str]           # unique registry key, e.g. "xss"
     skill_description: ClassVar[str]    # human-readable one-liner
     default_severity: ClassVar[ThreatLevel] = ThreatLevel.MEDIUM
+    verification_instructions: ClassVar[str] = ""  # AI verification guidance per threat
 
     @abstractmethod
     async def execute(

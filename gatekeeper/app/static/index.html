@@ -993,6 +993,9 @@
         .tl .ts     { color: var(--text-500); font-size: 10px; }
         .tl .mitre  { color: var(--purple-bright); font-weight: 600; }
         .tl .cvss   { color: var(--warning); font-weight: 600; }
+        .tl.ai      { color: #c084fc; border-left: 2px solid rgba(168, 85, 247, 0.4); padding-left: 8px; margin-left: 4px; }
+        .tl.ai .ai-label { color: var(--purple-bright); font-weight: 700; font-size: 10px; letter-spacing: 0.5px; }
+        .tl.ai-detail { color: var(--text-300); font-size: 12px; padding-left: 18px; margin-left: 4px; border-left: 2px solid rgba(168, 85, 247, 0.2); }
 
         .term-input {
             display: flex;
@@ -2453,6 +2456,62 @@
         el.scrollTop = el.scrollHeight;
     }
 
+    function tlogAi(team, label, msg) {
+        const id = team === 'red' ? 'redTerminalBody' : team === 'blue' ? 'blueTerminalBody' : 'purpleTerminalBody';
+        const el = document.getElementById(id);
+        const ts = new Date().toLocaleTimeString();
+        const line = document.createElement('div');
+        line.className = 'tl ai';
+        line.innerHTML = `<span class="ts">[${ts}]</span> <span class="ai-label">GEMINI</span> [${esc(label)}] ${esc(msg)}`;
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function tlogAiDetail(team, msg) {
+        const id = team === 'red' ? 'redTerminalBody' : team === 'blue' ? 'blueTerminalBody' : 'purpleTerminalBody';
+        const el = document.getElementById(id);
+        const line = document.createElement('div');
+        line.className = 'tl ai-detail';
+        line.innerHTML = esc(msg);
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function displayGeminiLogs(team, logs) {
+        if (!Array.isArray(logs) || logs.length === 0) return;
+        tlog(team, 'info', '─── Gemini AI Logs ───');
+        logs.forEach((log, idx) => {
+            const phase = log.phase || 'unknown';
+            const model = log.model || 'unknown';
+            const tokens = log.tokens_used || 0;
+            const duration = log.duration_ms ? log.duration_ms.toFixed(0) : '?';
+            const summary = log.prompt_summary || '';
+
+            tlogAi(team, phase, `${summary} (model=${model}, tokens=${tokens}, ${duration}ms)`);
+
+            const response = (log.response_text || '').trim();
+            if (response) {
+                // Show response text, truncated for readability
+                const lines = response.split('\n').slice(0, 12);
+                lines.forEach(line => {
+                    if (line.trim()) tlogAiDetail(team, line.trim());
+                });
+                if (response.split('\n').length > 12) {
+                    tlogAiDetail(team, '... (truncated)');
+                }
+            }
+
+            const toolCalls = log.tool_calls || [];
+            if (toolCalls.length > 0) {
+                tlogAiDetail(team, `MCP Tool Calls: ${toolCalls.length}`);
+                toolCalls.slice(0, 5).forEach(tc => {
+                    tlogAiDetail(team, `  → ${tc.name || 'unknown'}(${JSON.stringify(tc.args || {}).slice(0, 80)})`);
+                });
+            }
+        });
+        tlog(team, 'info', '─── End AI Logs ───');
+    }
+
     function clearTerminal(team) {
         const id = team === 'red' ? 'redTerminalBody' : team === 'blue' ? 'blueTerminalBody' : 'purpleTerminalBody';
         document.getElementById(id).innerHTML = '<div class="tl info">Terminal cleared.</div>';
@@ -2613,6 +2672,14 @@
         selectedSkill = name;
         document.querySelectorAll('#skillGrid .skill-btn').forEach(b => b.classList.toggle('active', b.dataset.skill === name));
         tlog('red', 'info', `Selected: ${name}`);
+        // Show verification_instructions if available
+        const skill = availableSkills.find(s => s.skill_name === name);
+        if (skill && skill.verification_instructions) {
+            tlogAi('red', 'verification', `AI確認手順 (${skill.display_name || name}):`);
+            skill.verification_instructions.split('\n').forEach(line => {
+                if (line.trim()) tlogAiDetail('red', line.trim());
+            });
+        }
     }
 
     let _skillGridHandlersAttached = false;
@@ -3390,6 +3457,11 @@
             checkResults.forEach(ar => {
                 const tag = ar.success ? 'VULN' : 'PASS';
                 tlog(team, ar.success ? 'err' : 'ok', `  [${tag}] ${ar.skill_name} - ${ar.severity}`);
+                // Display per-skill Gemini AI verification logs
+                const skillLogs = ar.gemini_logs || [];
+                if (skillLogs.length > 0) {
+                    displayGeminiLogs(team, skillLogs);
+                }
             });
         }
         if (result.assessment_metadata && typeof result.assessment_metadata === 'object') {
@@ -3430,6 +3502,12 @@
             (plan.priority_order || []).slice(0, 10).forEach((name, idx) => {
                 tlog(team, 'info', `  ${idx + 1}. ${name}`);
             });
+        }
+
+        // Display report-level Gemini AI logs (plan generation, MCP interactions)
+        const reportGeminiLogs = (result.assessment_metadata || {}).gemini_logs || result.gemini_logs || [];
+        if (reportGeminiLogs.length > 0) {
+            displayGeminiLogs(team, reportGeminiLogs);
         }
     }
 

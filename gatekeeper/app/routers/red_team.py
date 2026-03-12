@@ -320,6 +320,7 @@ async def list_scenarios() -> dict:
                     "severity": skill.default_severity.value,
                     "category": meta["category"],
                     "order": meta["order"],
+                    "verification_instructions": getattr(skill, "verification_instructions", "") or "",
                 }
             )
 
