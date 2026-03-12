@@ -468,6 +468,197 @@ class AttackOrchestrator:
 
         return result
 
+    async def _ai_analyze_recon(
+        self,
+        recon: ReconData,
+        metadata_out: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Plan mode: Gemini analyzes recon data and produces a threat surface assessment.
+
+        This gives users visibility into what the AI observed during reconnaissance
+        and how it interprets the attack surface before generating a check plan.
+        """
+        import time as _time
+
+        registry = get_registry()
+        available_skills = registry.list_all()
+        skills_with_instructions = []
+        for sk in available_skills:
+            vi = getattr(sk, "verification_instructions", "") or ""
+            skills_with_instructions.append({
+                "name": sk.skill_name,
+                "description": sk.skill_description,
+                "severity": sk.default_severity.value if hasattr(sk.default_severity, "value") else str(sk.default_severity),
+                "verification_instructions": vi[:300] if vi else "(none)",
+            })
+
+        prompt = (
+            "あなたはAIアプリケーション専門のセキュリティアナリストです。\n"
+            "以下の偵察(Recon)データを分析し、対象アプリケーションの攻撃面(Attack Surface)を評価してください。\n\n"
+            f"## 対象URL: {recon.url}\n\n"
+            f"## ページテキスト (先頭800文字):\n{recon.text[:800]}\n\n"
+            f"## 入力フィールド数: {len(recon.inputs)}\n"
+            f"## フォーム数: {len(recon.forms)}\n"
+            f"## Cookie数: {len(recon.cookies)}\n"
+            f"## LocalStorageキー: {list(recon.local_storage.keys())[:10]}\n\n"
+            f"## 利用可能なスキル一覧:\n"
+            + "\n".join(
+                f"- {sk['name']}: {sk['description']} (severity={sk['severity']})"
+                for sk in skills_with_instructions[:15]
+            )
+            + "\n\n"
+            "以下のJSON形式で回答してください:\n"
+            '{\n'
+            '  "application_type": "対象アプリの種類(例: AIチャット、RAGアプリ等)",\n'
+            '  "threat_surface_summary": "攻撃面の概要(日本語)",\n'
+            '  "identified_entry_points": ["入力フィールドやインタラクションポイントのリスト"],\n'
+            '  "risk_indicators": ["発見されたリスク指標のリスト"],\n'
+            '  "recommended_checks": [\n'
+            '    {"skill_name": "スキル名", "reason": "このチェックを推奨する理由"}\n'
+            '  ],\n'
+            '  "overall_risk_level": "low|medium|high|critical"\n'
+            '}'
+        )
+
+        start = _time.time()
+        try:
+            ai_result = await self.gemini_client.analyze_with_flash(
+                [{"type": "text", "text": prompt}],
+                system_instruction=(
+                    "You are a security analyst specializing in AI/LLM application security. "
+                    "Analyze the reconnaissance data and produce a threat surface assessment in Japanese. "
+                    "Always respond in valid JSON format."
+                ),
+            )
+            duration_ms = (_time.time() - start) * 1000
+            raw_reasoning = str(ai_result.get("reasoning", ""))
+
+            log_entry = {
+                "phase": "recon_analysis",
+                "prompt_summary": "[Recon Analysis] 対象アプリの攻撃面分析",
+                "response_text": raw_reasoning[:2000],
+                "model": str(ai_result.get("model_version", "")),
+                "tokens_used": int(ai_result.get("tokens_used", 0)),
+                "duration_ms": round(duration_ms, 2),
+                "tool_calls": [],
+            }
+            metadata_out.setdefault("gemini_logs", []).append(log_entry)
+
+            # Also store structured analysis for the frontend
+            metadata_out["recon_analysis"] = {
+                "raw": raw_reasoning[:3000],
+                "model": str(ai_result.get("model_version", "")),
+                "duration_ms": round(duration_ms, 2),
+            }
+
+            logger.info(
+                "AI recon analysis completed",
+                duration_ms=round(duration_ms, 2),
+                tokens=ai_result.get("tokens_used", 0),
+            )
+            return ai_result
+
+        except Exception as exc:
+            duration_ms = (_time.time() - start) * 1000
+            log_entry = {
+                "phase": "recon_analysis",
+                "prompt_summary": "[Recon Analysis] 対象アプリの攻撃面分析",
+                "response_text": f"Recon analysis failed: {self._safe_error_text(exc)}",
+                "duration_ms": round(duration_ms, 2),
+                "tool_calls": [],
+            }
+            metadata_out.setdefault("gemini_logs", []).append(log_entry)
+            logger.warning("AI recon analysis failed", error=self._safe_error_text(exc))
+            return {}
+
+    async def _ai_generate_skill_rationale(
+        self,
+        plan: "VulnerabilityCheckPlan",
+        recon: ReconData,
+        metadata_out: dict[str, Any],
+    ) -> None:
+        """Plan mode: Gemini generates per-skill rationale explaining why each check was selected.
+
+        This provides visibility into the AI's decision-making for each planned check.
+        """
+        import time as _time
+
+        registry = get_registry()
+        skill_details = []
+        for name in plan.priority_order[:10]:
+            sk = registry.get(name)
+            if sk is None:
+                continue
+            vi = getattr(sk, "verification_instructions", "") or ""
+            skill_details.append(
+                f"- {name}: {sk.skill_description}\n"
+                f"  確認手順: {vi[:200] if vi else '(未定義)'}"
+            )
+
+        prompt = (
+            "あなたはセキュリティ検査プランナーです。\n"
+            "以下の脆弱性チェックプランについて、各スキルの選定理由と期待される検出内容を説明してください。\n\n"
+            f"## 対象URL: {recon.url}\n"
+            f"## プラン概要: {plan.reasoning[:500]}\n\n"
+            "## 選定されたスキル:\n"
+            + "\n".join(skill_details)
+            + "\n\n"
+            "各スキルについて以下の形式で回答してください:\n"
+            '[\n'
+            '  {"skill_name": "スキル名", "selection_reason": "選定理由", '
+            '"expected_findings": "期待される検出内容", '
+            '"playwright_actions": "Playwrightで実行される主なアクション"}\n'
+            ']'
+        )
+
+        start = _time.time()
+        try:
+            ai_result = await self.gemini_client.analyze_with_flash(
+                [{"type": "text", "text": prompt}],
+                system_instruction=(
+                    "You are a security assessment planner. "
+                    "Explain the rationale for each selected check in Japanese. "
+                    "Respond with a JSON array."
+                ),
+            )
+            duration_ms = (_time.time() - start) * 1000
+            raw_reasoning = str(ai_result.get("reasoning", ""))
+
+            log_entry = {
+                "phase": "skill_rationale",
+                "prompt_summary": f"[Skill Rationale] {len(plan.priority_order)}件のスキル選定理由",
+                "response_text": raw_reasoning[:2000],
+                "model": str(ai_result.get("model_version", "")),
+                "tokens_used": int(ai_result.get("tokens_used", 0)),
+                "duration_ms": round(duration_ms, 2),
+                "tool_calls": [],
+            }
+            metadata_out.setdefault("gemini_logs", []).append(log_entry)
+
+            # Store skill rationale for frontend
+            metadata_out["skill_rationale"] = {
+                "raw": raw_reasoning[:3000],
+                "model": str(ai_result.get("model_version", "")),
+                "duration_ms": round(duration_ms, 2),
+            }
+
+            logger.info(
+                "AI skill rationale generated",
+                skills=len(plan.priority_order),
+                duration_ms=round(duration_ms, 2),
+            )
+        except Exception as exc:
+            duration_ms = (_time.time() - start) * 1000
+            log_entry = {
+                "phase": "skill_rationale",
+                "prompt_summary": f"[Skill Rationale] {len(plan.priority_order)}件のスキル選定理由",
+                "response_text": f"Skill rationale generation failed: {self._safe_error_text(exc)}",
+                "duration_ms": round(duration_ms, 2),
+                "tool_calls": [],
+            }
+            metadata_out.setdefault("gemini_logs", []).append(log_entry)
+            logger.warning("AI skill rationale generation failed", error=self._safe_error_text(exc))
+
     async def _collect_recon(
         self,
         target_url: str,
@@ -839,7 +1030,12 @@ class AttackOrchestrator:
             metadata_out=report.assessment_metadata,
         )
 
-        logger.info("Generating vulnerability check plan")
+        # Phase 1: AI Recon Analysis — Gemini analyzes the collected recon data
+        logger.info("Phase 1: AI recon analysis")
+        await self._ai_analyze_recon(recon, report.assessment_metadata)
+
+        # Phase 2: Plan Generation — Gemini selects and prioritizes checks
+        logger.info("Phase 2: Generating vulnerability check plan")
         plan = await self._generate_vulnerability_check_plan(
             recon=recon,
             static_findings=None,
@@ -850,6 +1046,10 @@ class AttackOrchestrator:
         )
         report.vulnerability_check_plan = plan
         report.sync_legacy_fields()
+
+        # Phase 3: Skill Rationale — Gemini explains why each check was selected
+        logger.info("Phase 3: Generating per-skill rationale")
+        await self._ai_generate_skill_rationale(plan, recon, report.assessment_metadata)
 
         logger.info(
             "Plan created; autonomous execution is disabled by policy",
@@ -935,6 +1135,9 @@ class AttackOrchestrator:
             metadata_out=report.assessment_metadata,
         )
 
+        # Phase 1: AI Recon Analysis
+        await self._ai_analyze_recon(recon, report.assessment_metadata)
+
         logger.info("Generating vulnerability check plan", has_static_context=bool(static_findings))
         plan = await self._generate_vulnerability_check_plan(
             recon,
@@ -946,6 +1149,9 @@ class AttackOrchestrator:
         )
         report.vulnerability_check_plan = plan
         report.sync_legacy_fields()
+
+        # Phase 3: Skill Rationale
+        await self._ai_generate_skill_rationale(plan, recon, report.assessment_metadata)
 
         report.calculate_score()
         report.finished_at = datetime.utcnow().isoformat()

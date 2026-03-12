@@ -3399,7 +3399,11 @@
         const isStaticResult = !!result.repository_url && !!result.scan_metadata;
         const isPlanOnly = !!plan && (!Array.isArray(checkResults) || checkResults.length === 0);
         if (team === 'red' && isPlanOnly) {
-            tlog(team, 'info', 'Execution: plan-only (no checks executed; explicit approval is required per check).');
+            tlog(team, 'info', '── Plan Mode ── AI偵察分析 → チェックプラン生成 → スキル選定理由');
+            tlog(team, 'info', '(チェック実行には dynamic_checks モードで明示的な承認が必要です)');
+        }
+        if (team === 'red' && !isPlanOnly && checkResults.length > 0) {
+            tlog(team, 'info', `── Check Mode ── ${checkResults.length}件のスキルを実行 + AI検証`);
         }
 
         if (result.scan_metadata) {
@@ -3500,7 +3504,15 @@
             }
             tlog(team, 'info', `Planned checks: ${(plan.priority_order || []).length}`);
             (plan.priority_order || []).slice(0, 10).forEach((name, idx) => {
+                // Show verification_instructions for each planned skill if available
+                const skillInfo = availableSkills.find(s => s.skill_name === name);
+                const vi = skillInfo ? skillInfo.verification_instructions : '';
                 tlog(team, 'info', `  ${idx + 1}. ${name}`);
+                if (vi && isPlanOnly) {
+                    vi.split('\n').slice(0, 3).forEach(line => {
+                        if (line.trim()) tlogAiDetail(team, `     ${line.trim()}`);
+                    });
+                }
             });
         }
 
