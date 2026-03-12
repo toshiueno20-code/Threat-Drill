@@ -2477,39 +2477,39 @@
         el.scrollTop = el.scrollHeight;
     }
 
+    function displayGeminiLog(team, log) {
+        const phase = log.phase || 'unknown';
+        const model = log.model || 'unknown';
+        const tokens = log.tokens_used || 0;
+        const duration = log.duration_ms ? log.duration_ms.toFixed(0) : '?';
+        const summary = log.prompt_summary || '';
+
+        tlogAi(team, phase, `${summary} (model=${model}, tokens=${tokens}, ${duration}ms)`);
+
+        const response = (log.response_text || '').trim();
+        if (response) {
+            const maxLines = 20;
+            const allLines = response.split('\n');
+            allLines.slice(0, maxLines).forEach(line => {
+                if (line.trim()) tlogAiDetail(team, line.trim());
+            });
+            if (allLines.length > maxLines) {
+                tlogAiDetail(team, `... (${allLines.length - maxLines} lines truncated)`);
+            }
+        }
+
+        const toolCalls = log.tool_calls || [];
+        if (toolCalls.length > 0) {
+            tlogAiDetail(team, `MCP Tool Calls: ${toolCalls.length}`);
+            toolCalls.slice(0, 8).forEach(tc => {
+                tlogAiDetail(team, `  → ${tc.name || 'unknown'}(${JSON.stringify(tc.args || {}).slice(0, 100)})`);
+            });
+        }
+    }
+
     function displayGeminiLogs(team, logs) {
         if (!Array.isArray(logs) || logs.length === 0) return;
-        tlog(team, 'info', '─── Gemini AI Logs ───');
-        logs.forEach((log, idx) => {
-            const phase = log.phase || 'unknown';
-            const model = log.model || 'unknown';
-            const tokens = log.tokens_used || 0;
-            const duration = log.duration_ms ? log.duration_ms.toFixed(0) : '?';
-            const summary = log.prompt_summary || '';
-
-            tlogAi(team, phase, `${summary} (model=${model}, tokens=${tokens}, ${duration}ms)`);
-
-            const response = (log.response_text || '').trim();
-            if (response) {
-                // Show response text, truncated for readability
-                const lines = response.split('\n').slice(0, 12);
-                lines.forEach(line => {
-                    if (line.trim()) tlogAiDetail(team, line.trim());
-                });
-                if (response.split('\n').length > 12) {
-                    tlogAiDetail(team, '... (truncated)');
-                }
-            }
-
-            const toolCalls = log.tool_calls || [];
-            if (toolCalls.length > 0) {
-                tlogAiDetail(team, `MCP Tool Calls: ${toolCalls.length}`);
-                toolCalls.slice(0, 5).forEach(tc => {
-                    tlogAiDetail(team, `  → ${tc.name || 'unknown'}(${JSON.stringify(tc.args || {}).slice(0, 80)})`);
-                });
-            }
-        });
-        tlog(team, 'info', '─── End AI Logs ───');
+        logs.forEach(log => displayGeminiLog(team, log));
     }
 
     function clearTerminal(team) {
@@ -3398,31 +3398,156 @@
         const plan = result.vulnerability_check_plan || result.attack_plan;
         const isStaticResult = !!result.repository_url && !!result.scan_metadata;
         const isPlanOnly = !!plan && (!Array.isArray(checkResults) || checkResults.length === 0);
+
+        // Collect Gemini logs indexed by phase for inline display
+        const allGeminiLogs = (result.assessment_metadata || {}).gemini_logs || result.gemini_logs || [];
+        const logsByPhase = {};
+        allGeminiLogs.forEach(log => {
+            const phase = log.phase || 'other';
+            if (!logsByPhase[phase]) logsByPhase[phase] = [];
+            logsByPhase[phase].push(log);
+        });
+
+        const meta = result.assessment_metadata || {};
+        const approvals = meta.approvals || {};
+        const recon = meta.recon || {};
+        const ai = meta.ai || {};
+        const uniq = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter(Boolean))];
+
+        // ──────────────────────────────────────────────
+        //  Plan Mode: phase-by-phase inline display
+        // ──────────────────────────────────────────────
         if (team === 'red' && isPlanOnly) {
-            tlog(team, 'info', 'Execution: plan-only (no checks executed; explicit approval is required per check).');
+            tlog(team, 'cmd', '══════════════════════════════════════════');
+            tlog(team, 'cmd', '  PLAN MODE — AI偵察分析 → プラン生成 → スキル選定理由');
+            tlog(team, 'cmd', '══════════════════════════════════════════');
+
+            // ── Phase 0: Approvals & Recon Summary ──
+            tlog(team, 'info', '');
+            tlog(team, 'warn', '▶ Phase 0: Approvals & Reconnaissance');
+            if (approvals.approved_by || approvals.allow_browser_automation || approvals.allow_mcp_tools) {
+                tlog(team, 'info', `  Approvals: approved_by=${approvals.approved_by || '(none)'}, browser=${!!approvals.allow_browser_automation}, mcp=${!!approvals.allow_mcp_tools}`);
+            }
+            if (recon.method) {
+                const tools = uniq((recon.tool_calls || []).map(x => x.tool));
+                tlog(team, 'info', `  Recon: method=${recon.method}, tool_calls=${recon.tool_calls_count ?? 0}`);
+                if (tools.length > 0) {
+                    tlog(team, 'info', `  Playwright tools: [${tools.join(', ')}]`);
+                }
+            }
+
+            // ── Phase 1: AI Recon Analysis ──
+            tlog(team, 'info', '');
+            tlog(team, 'warn', '▶ Phase 1: AI偵察分析 (Recon Analysis)');
+            tlog(team, 'info', '  Geminiが収集した偵察データを分析し、攻撃面を評価します');
+            const reconLogs = logsByPhase['recon_analysis'] || [];
+            if (reconLogs.length > 0) {
+                reconLogs.forEach(log => displayGeminiLog(team, log));
+            } else {
+                tlog(team, 'info', '  (偵察分析ログなし)');
+            }
+
+            // ── Phase 2: Plan Generation ──
+            tlog(team, 'info', '');
+            tlog(team, 'warn', '▶ Phase 2: チェックプラン生成 (Plan Generation)');
+            tlog(team, 'info', '  Geminiが偵察結果から実行すべきチェックを選定・優先順位付けします');
+            if (ai.engine || ai.model_version) {
+                const fcs = Array.isArray(ai.mcp_function_calls) ? ai.mcp_function_calls : [];
+                const fcNames = uniq(fcs.map(fc => fc.name));
+                const mcpNote = ai.mcp_used ? `, mcp_calls=${ai.mcp_function_calls_count ?? 0}` : '';
+                tlog(team, 'info', `  AI: engine=${ai.engine || 'unknown'}, model=${ai.model_version || 'unknown'}, fallback=${!!ai.provider_fallback}, tokens=${ai.tokens_used ?? 'n/a'}, ${(ai.analysis_duration_ms ?? 0).toFixed ? (ai.analysis_duration_ms).toFixed(0) + 'ms' : 'n/a'}${mcpNote}`);
+                if (ai.mcp_available_tools_count != null) {
+                    tlog(team, 'info', `  MCP tools: available=${ai.mcp_available_tools_count}, max_remote_calls=${ai.mcp_max_remote_calls ?? 'n/a'}`);
+                }
+                if (fcNames.length > 0) {
+                    tlog(team, 'info', `  MCP calls: [${fcNames.join(', ')}]`);
+                }
+            }
+            const planLogs = (logsByPhase['planning'] || []).concat(logsByPhase['planning_mcp'] || []);
+            if (planLogs.length > 0) {
+                planLogs.forEach(log => displayGeminiLog(team, log));
+            }
+            if (plan && plan.priority_order) {
+                if (plan.reasoning) {
+                    const r = String(plan.reasoning);
+                    const trimmed = r.length > 600 ? (r.slice(0, 600) + '...') : r;
+                    tlog(team, 'ok', `  Plan reasoning: ${trimmed}`);
+                }
+            }
+
+            // ── Phase 3: Per-skill Rationale + Verification Instructions ──
+            tlog(team, 'info', '');
+            tlog(team, 'warn', '▶ Phase 3: スキル選定理由 + 確認手順 (Skill Rationale)');
+            tlog(team, 'info', '  Geminiが各スキルの選定理由と、Playwrightで実行される確認手順を説明します');
+            const rationaleLogs = logsByPhase['skill_rationale'] || [];
+            if (rationaleLogs.length > 0) {
+                rationaleLogs.forEach(log => displayGeminiLog(team, log));
+            }
+
+            if (plan && plan.priority_order) {
+                tlog(team, 'info', '');
+                tlog(team, 'warn', `▶ 実行予定チェック: ${(plan.priority_order || []).length}件`);
+                (plan.priority_order || []).forEach((name, idx) => {
+                    const skillInfo = availableSkills.find(s => s.skill_name === name);
+                    const desc = skillInfo ? skillInfo.description : '';
+                    const sev = skillInfo ? skillInfo.severity : '';
+                    const vi = skillInfo ? (skillInfo.verification_instructions || '') : '';
+
+                    tlog(team, 'info', `  ${idx + 1}. ${name}  [${sev}]`);
+                    if (desc) tlogAiDetail(team, `     ${desc}`);
+                    if (vi) {
+                        tlogAiDetail(team, '     ── Playwright確認手順 ──');
+                        vi.split('\n').forEach(line => {
+                            if (line.trim()) tlogAiDetail(team, `     ${line.trim()}`);
+                        });
+                    }
+                });
+            }
+
+            tlog(team, 'info', '');
+            tlog(team, 'cmd', '══════════════════════════════════════════');
+            tlog(team, 'info', 'チェック実行するには dynamic_checks モードに切り替え、承認してください');
+            tlog(team, 'cmd', '══════════════════════════════════════════');
+
+            return; // Plan mode display complete
         }
 
+        // ──────────────────────────────────────────────
+        //  Check Mode: per-skill execution + AI verification
+        // ──────────────────────────────────────────────
+        if (team === 'red' && checkResults.length > 0) {
+            tlog(team, 'cmd', '══════════════════════════════════════════');
+            tlog(team, 'cmd', `  CHECK MODE — ${checkResults.length}件のスキルを実行 + AI検証`);
+            tlog(team, 'cmd', '══════════════════════════════════════════');
+
+            if (approvals.approved_by) {
+                tlog(team, 'info', `Approvals: approved_by=${approvals.approved_by}, browser=${!!approvals.allow_browser_automation}`);
+            }
+            if (recon.method) {
+                const tools = uniq((recon.tool_calls || []).map(x => x.tool));
+                tlog(team, 'info', `Recon: method=${recon.method}, tool_calls=${recon.tool_calls_count ?? 0}, tools=[${tools.join(', ')}]`);
+            }
+        }
+
+        // Static scan results
         if (result.scan_metadata) {
-            const meta = result.scan_metadata;
-            const totalFiles = meta.total_files_scanned ?? 0;
+            const scanMeta = result.scan_metadata;
+            const totalFiles = scanMeta.total_files_scanned ?? 0;
             tlog(team, 'info', `Files scanned: ${totalFiles}`);
-            if (meta.analysis_engine) tlog(team, 'info', `Analysis engine: ${meta.analysis_engine}`);
-            if (meta.ai_enabled !== undefined) tlog(team, 'info', `AI enabled: ${meta.ai_enabled}`);
-            if (meta.ai_status) tlog(team, 'info', `AI status: ${meta.ai_status}`);
-            const classified = meta.classified_files || {};
+            if (scanMeta.analysis_engine) tlog(team, 'info', `Analysis engine: ${scanMeta.analysis_engine}`);
+            if (scanMeta.ai_enabled !== undefined) tlog(team, 'info', `AI enabled: ${scanMeta.ai_enabled}`);
+            if (scanMeta.ai_status) tlog(team, 'info', `AI status: ${scanMeta.ai_status}`);
+            const classified = scanMeta.classified_files || {};
             const classifiedTotal = Object.values(classified).reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0);
             tlog(team, 'info', `Classified files: ${classifiedTotal}`);
             ['system_prompts', 'tool_definitions', 'api_keys_files', 'config_files', 'rag_configs', 'code_files'].forEach((key) => {
-                if ((classified[key] ?? 0) > 0) {
-                    tlog(team, 'info', `  - ${key}: ${classified[key]}`);
-                }
+                if ((classified[key] ?? 0) > 0) tlog(team, 'info', `  - ${key}: ${classified[key]}`);
             });
         }
 
         if (result.assessment_quality) {
             const level = result.assessment_quality === 'normal_coverage' ? 'ok' : 'warn';
-            const msg = result.coverage_message || `Assessment quality: ${result.assessment_quality}`;
-            tlog(team, level, msg);
+            tlog(team, level, result.coverage_message || `Assessment quality: ${result.assessment_quality}`);
         }
 
         const riskSummary = result.risk_summary || {};
@@ -3440,8 +3565,7 @@
             vulnerabilities.slice(0, 10).forEach((v, i) => {
                 const sev = v.severity || 'unknown';
                 const title = v.title || v.type || 'Unnamed finding';
-                const level = sev === 'critical' || sev === 'high' ? 'err' : 'warn';
-                tlog(team, level, `  ${i + 1}. [${sev}] ${title}`);
+                tlog(team, sev === 'critical' || sev === 'high' ? 'err' : 'warn', `  ${i + 1}. [${sev}] ${title}`);
             });
         } else if (result.repository_url) {
             tlog(team, 'info', 'No vulnerabilities were reported by current static checks.');
@@ -3453,61 +3577,56 @@
             recommendations.slice(0, 5).forEach((rec, i) => tlog(team, 'ok', `  ${i + 1}. ${rec}`));
         }
 
+        // Check mode: per-skill results with inline AI verification logs
         if (checkResults && checkResults.length > 0) {
-            checkResults.forEach(ar => {
+            tlog(team, 'info', '');
+            checkResults.forEach((ar, i) => {
                 const tag = ar.success ? 'VULN' : 'PASS';
-                tlog(team, ar.success ? 'err' : 'ok', `  [${tag}] ${ar.skill_name} - ${ar.severity}`);
-                // Display per-skill Gemini AI verification logs
+                const sevLevel = ar.success ? 'err' : 'ok';
+                tlog(team, sevLevel, `  [${tag}] ${ar.skill_name} - ${ar.severity}`);
+                if (ar.evidence && ar.evidence.length > 0) {
+                    ar.evidence.slice(0, 5).forEach(e => {
+                        tlogAiDetail(team, `     Evidence: ${typeof e === 'string' ? e : JSON.stringify(e)}`);
+                    });
+                }
+                if (ar.timeline && ar.timeline.length > 0) {
+                    const keyEvents = ar.timeline.filter(t => t.action === 'success' || t.action === 'warning' || t.action === 'phase');
+                    keyEvents.slice(0, 5).forEach(t => {
+                        tlogAiDetail(team, `     [${t.action}] ${t.detail}`);
+                    });
+                }
+                // AI verification logs inline
                 const skillLogs = ar.gemini_logs || [];
                 if (skillLogs.length > 0) {
-                    displayGeminiLogs(team, skillLogs);
+                    skillLogs.forEach(log => displayGeminiLog(team, log));
                 }
+                if (i < checkResults.length - 1) tlog(team, 'info', '  ─────────────────────────────────');
             });
         }
-        if (result.assessment_metadata && typeof result.assessment_metadata === 'object') {
-            const m = result.assessment_metadata;
-            const approvals = m.approvals || {};
-            const recon = m.recon || {};
-            const ai = m.ai || {};
 
-            const uniq = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter(Boolean))];
-
+        // Non-plan, non-check metadata (fallback for other teams / modes)
+        if (!isPlanOnly && checkResults.length === 0) {
             if (approvals.approved_by || approvals.allow_browser_automation || approvals.allow_mcp_tools) {
                 tlog(team, 'info', `Approvals: approved_by=${approvals.approved_by || '(none)'}, browser_automation=${!!approvals.allow_browser_automation}, mcp_tools=${!!approvals.allow_mcp_tools}`);
             }
-
             if (recon.method) {
                 const tools = uniq((recon.tool_calls || []).map(x => x.tool));
-                const toolNote = tools.length > 0 ? `, tools=[${tools.slice(0, 8).join(', ')}${tools.length > 8 ? ', ...' : ''}]` : '';
+                const toolNote = tools.length > 0 ? `, tools=[${tools.join(', ')}]` : '';
                 tlog(team, 'info', `Recon: method=${recon.method}, tool_calls=${recon.tool_calls_count ?? 0}${toolNote}`);
             }
-
             if (ai.engine || ai.model_version) {
-                const fcs = Array.isArray(ai.mcp_function_calls) ? ai.mcp_function_calls : [];
-                const fcNames = uniq(fcs.map(fc => fc.name));
-                const fcNote = fcNames.length > 0 ? `, calls=[${fcNames.slice(0, 8).join(', ')}${fcNames.length > 8 ? ', ...' : ''}]` : '';
-                tlog(team, 'info', `AI: enabled=${ai.enabled ?? 'n/a'}, engine=${ai.engine || 'unknown'}, model=${ai.model_version || 'unknown'}, fallback=${!!ai.provider_fallback}, duration_ms=${ai.analysis_duration_ms ?? 'n/a'}, tokens=${ai.tokens_used ?? 'n/a'}, mcp_used=${!!ai.mcp_used}, mcp_calls=${ai.mcp_function_calls_count ?? 0}${fcNote}`);
-                if (ai.mcp_available_tools_count != null) {
-                    tlog(team, 'info', `MCP tools: available=${ai.mcp_available_tools_count}, max_remote_calls=${ai.mcp_max_remote_calls ?? 'n/a'}`);
+                tlog(team, 'info', `AI: engine=${ai.engine || 'unknown'}, model=${ai.model_version || 'unknown'}, fallback=${!!ai.provider_fallback}`);
+            }
+            // Plan without priority_order (edge case)
+            if (plan && plan.priority_order) {
+                if (plan.reasoning) {
+                    const r = String(plan.reasoning);
+                    tlog(team, 'info', `Plan reasoning: ${r.length > 400 ? r.slice(0, 400) + '...' : r}`);
                 }
+                tlog(team, 'info', `Planned checks: ${plan.priority_order.length}`);
+                plan.priority_order.slice(0, 10).forEach((name, idx) => tlog(team, 'info', `  ${idx + 1}. ${name}`));
             }
-        }
-        if (plan && plan.priority_order) {
-            if (plan.reasoning) {
-                const r = String(plan.reasoning);
-                const trimmed = r.length > 400 ? (r.slice(0, 400) + '...') : r;
-                tlog(team, 'info', `Plan reasoning: ${trimmed}`);
-            }
-            tlog(team, 'info', `Planned checks: ${(plan.priority_order || []).length}`);
-            (plan.priority_order || []).slice(0, 10).forEach((name, idx) => {
-                tlog(team, 'info', `  ${idx + 1}. ${name}`);
-            });
-        }
-
-        // Display report-level Gemini AI logs (plan generation, MCP interactions)
-        const reportGeminiLogs = (result.assessment_metadata || {}).gemini_logs || result.gemini_logs || [];
-        if (reportGeminiLogs.length > 0) {
-            displayGeminiLogs(team, reportGeminiLogs);
+            if (allGeminiLogs.length > 0) displayGeminiLogs(team, allGeminiLogs);
         }
     }
 
